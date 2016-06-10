@@ -1,0 +1,6 @@
+[package]
+name = "cuslip"
+version = "0.1.0"
+authors = ["theJPster <github@thejpster.org.uk>"]
+
+[dependencies]
