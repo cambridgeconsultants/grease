@@ -45,3 +45,9 @@ Often it is useful to describe these interaction via the medium of the Message S
        |---------------->|
        |                 |
 ```
+
+During very early development, the code is built as a socket based AT command engine. It will open a socket to the specified address and port and it will repeatedly attempt to dial out. The layers are:
+
+1. Application. All the application logic - the top level module. It is a *user*, but never a *provider*.
+2. ProtoServer. Decodes a custom protocol sent over a socket.
+3. SocketServer. Handles TCP sockets.
