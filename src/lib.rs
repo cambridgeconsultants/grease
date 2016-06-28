@@ -1,43 +1,93 @@
+//! # cuslip - Making threads easier when you have rust.
+
 #![allow(dead_code)]
 
-pub mod atcommands;
+// ****************************************************************************
+//
+// Imports
+//
+// ****************************************************************************
+
+use std::sync::mpsc;
 pub mod socket;
 
-#[derive(Debug)]
-pub struct Message {
-    // Some identifier from the sender
-    pub sender: String,
-    // What the sender wishes to send
-    pub msg_type: MessageBody,
+// ****************************************************************************
+//
+// Public Types
+//
+// ****************************************************************************
+
+/// We use this for sending messages into a task
+pub type MessageSender = mpsc::Sender<Message>;
+
+/// A task uses this internally for pending on received messages
+pub type MessageReceiver = mpsc::Receiver<Message>;
+
+/// A message is the fundametal unit we pass between tasks.
+/// All messages have a body, but requests also have an mpsc Channel
+/// object that the match confirmation should be sent to.
+pub enum Message {
+    Request(MessageSender, MessageRequest),
+    Confirmation(MessageConfirmation),
+    Indication(MessageIndication),
 }
 
-#[derive(Debug)]
-pub enum MessageBody {
-    Request(Request),
-    Confirmation(Confirmation),
-    Indication(Indication),
+/// The set of all requests in the system.
+/// This is an enumeration of all the interfaces.
+pub enum MessageRequest {
+    Socket(socket::SocketReq),
 }
 
-#[derive(Debug)]
-pub enum Request {
-    Socket(socket::SocketRequest),
-    AT(atcommands::ATRequest),
+/// The set of all confirmations in the system.
+/// This is an enumeration of all the interfaces.
+pub enum MessageConfirmation {
+    Socket(socket::SocketCfm),
 }
 
-#[derive(Debug)]
-pub enum Confirmation {
-    Socket(socket::SocketConfirmation),
-    AT(atcommands::ATConfirmation),
+/// The set of all indications in the system.
+/// This is an enumeration of all the interfaces.
+pub enum MessageIndication {
+    Socket(socket::SocketInd),
 }
 
-#[derive(Debug)]
-pub enum Indication {
-    Socket(socket::SocketIndication),
-    AT(atcommands::ATIndication),
+// ****************************************************************************
+//
+// Private Types
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
+// Public Data
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
+// Public Functions
+//
+// ****************************************************************************
+
+/// Helper function to create an mpsc channel pair.
+pub fn make_channel() -> (MessageSender, MessageReceiver) {
+    let (tx, rx) = mpsc::channel::<Message>();
+    return (tx, rx);
 }
 
-#[cfg(test)]
-mod test {
-    #[test]
-    fn it_works() {}
-}
+// ****************************************************************************
+//
+// Private Functions
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
+// End Of File
+//
+// ****************************************************************************

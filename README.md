@@ -46,7 +46,13 @@ Often it is useful to describe these interaction via the medium of the Message S
        |                 |
 ```
 
-During very early development, the code is built as a socket based data server. It will receive connections on a socket and answer queries given to it. Later on I'll work out how to split the generic stuff from the implementation specific stuff.
+Each layer in the system is implemented as a thread. There are multiple classes of thread:
+
+* SingleQueueThread. Has a single queue. INDs and CFMs from providers are sent to this queue, as are REQs from any users above.
+* DoubleQueueThread. Has separate queues for providers and users. Allows the user queue to be handled singly - that is, pop a single REQ off, handle it with multiple REQ/CFM pairs to the provider below, then CFM the user's REQ, and only then pop the next REQ.
+
+We'll start with the SingleQueueThread as it is simpler to implement.
+
 
 ```
 +---------------------------+
@@ -64,6 +70,33 @@ During very early development, the code is built as a socket based data server. 
 * SocketServer. Handles TCP sockets.
 * Database. Stores information which Application needs to service requests from remote systems (which speak Proto).
 
+## Proto
+
 Proto is a noddy protocol I've invented which you can speak over any sort of stream. In this system, you could replace Socket with Serial and it would still work. Whether you can generically implement a Stream in both the Socket and Serial tasks such that ProtoServer didn't care which you used (yet where they still maintain their unique connection properties) is something I tend to explore later.
 
 PS: I know there's an AT command implementation in the source code at the moment. That was a first draft and I'll probably change it.
+
+### Commands
+
+Commands are terminated by a newline. Carriage returns are ignored. Commands and arguments are space separated. Arguments may not contain space characters or newlines or carriage returns - they must be escaped as BACKSLASH||SPACE, BACKSLASH||r and BACKSLASH||n respectively. Commands and arguments must be valid UTF-8. Binary data must be encoded as hex or base64 or somesuch.
+
+* GET <key> -> <value>
+* PUT <key> <value>
+* LIST -> [<key>,...]<key>
+* TIME -> <time>
+
+### GET
+
+Obtains some value from the database by its key.
+
+### PUT
+
+Stores some value in the database by its key.
+
+### LIST
+
+Shows all keys in the database.
+
+### TIME
+
+Returns the current time in UTC as an ISO 8601 string.
