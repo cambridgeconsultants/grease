@@ -17,6 +17,7 @@ use std::net;
 use std::io;
 use std::thread;
 use std::collections::HashMap;
+use mio;
 use super::{NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
@@ -27,7 +28,7 @@ use super::{NonRequestSendable, RequestSendable};
 
 /// Requests that can be sent to the Socket task
 /// We box all the parameters, in case any of the structs are large as we don't
-/// want to bloat the mastersuper::Message super::type.
+/// want to bloat the master Message type.
 #[derive(Debug)]
 pub enum SocketReq {
     Bind(Box<ReqBind>),
@@ -75,7 +76,7 @@ pub struct ReqUnbind {
 /// Close an open connection
 #[derive(Debug)]
 pub struct ReqClose {
-    /// The handle from a IndConnect
+    /// The handle from a IndConnected
     pub handle: OpenHandle,
 }
 
@@ -171,21 +172,29 @@ pub enum SocketError {
 //
 // ****************************************************************************
 
+/// Created for every bound (i.e. listening) socket
 struct ListeningSocket {
     handle: ListenHandle,
-    socket: net::TcpListener, // thread: thread::JoinHandle<()>
+    socket: net::TcpListener,
+    thread: thread::JoinHandle<()>,
 }
 
+/// Created for every connection receieved on a ListeningSocket
 struct ConnectedSocket {
     addr: String,
     port: u16,
 }
 
-struct TaskData {
+/// One instance per task. Stores all the task data.
+struct TaskContext {
+    /// Set of all bound sockets
     listeners: HashMap<ListenHandle, ListeningSocket>,
+    /// Set of all connected sockets
     connections: HashMap<OpenHandle, ConnectedSocket>,
-    last_open: OpenHandle,
-    last_listen: ListenHandle,
+    /// The next handle we'll use for a bound socket
+    next_listen: ListenHandle,
+    /// The next handle we'll use for an open socket
+    next_open: OpenHandle,
 }
 
 // ****************************************************************************
@@ -215,14 +224,36 @@ pub fn new() -> super::MessageSender {
 // ****************************************************************************
 
 /// The task runs this main loop indefinitely.
+/// Unfortunately, to use mio, we have to use their special
+/// channels. So, we spin up a thread to bounce from one
+/// channel to the other.
 fn main_loop(rx: super::MessageReceiver) {
-    let mut t = TaskData::new();
-    loop {
-        let msg = rx.recv().unwrap();
+    let mut event_loop = mio::EventLoop::new().unwrap();
+    let ch = event_loop.channel();
+    let _ = thread::spawn(move || {
+        loop {
+            let msg = rx.recv().unwrap();
+            ch.send(msg).unwrap();
+        }
+    });
+    let mut task_context = TaskContext::new();
+    event_loop.run(&mut task_context).unwrap();
+}
+
+impl mio::Handler for TaskContext {
+    type Timeout = u32;
+    type Message = super::Message;
+    fn ready(&mut self,
+             event_loop: &mut mio::EventLoop<TaskContext>,
+             token: mio::Token,
+             events: mio::EventSet) {
+        warn!("Ready!");
+    }
+    fn notify(&mut self, event_loop: &mut mio::EventLoop<TaskContext>, msg: super::Message) {
         match msg {
             // We only handle our own requests
             super::Message::Request(reply_to, super::Request::Socket(x)) => {
-                t.handle_req(&x, &reply_to)
+                self.handle_req(&x, &reply_to)
             }
             // We don't have any responses
             // We don't expect any Indications or Confirmations from other providers
@@ -230,16 +261,26 @@ fn main_loop(rx: super::MessageReceiver) {
             _ => error!("Unexpected message in socket task: {:?}", msg),
         }
     }
+    fn timeout(&mut self, event_loop: &mut mio::EventLoop<TaskContext>, timeout: Self::Timeout) {
+        warn!("Timeout!");
+    }
+    fn interrupted(&mut self, event_loop: &mut mio::EventLoop<TaskContext>) {
+        warn!("Interrupted!");
+    }
+    fn tick(&mut self, event_loop: &mut mio::EventLoop<TaskContext>) {
+        debug!("Tick!");
+    }
 }
 
-impl TaskData {
+impl TaskContext {
     /// Init the context
-    pub fn new() -> TaskData {
-        TaskData {
+    pub fn new() -> TaskContext {
+        TaskContext {
             listeners: HashMap::new(),
             connections: HashMap::new(),
-            last_open: 0,
-            last_listen: 1_000_000,
+            // It helps the debug to keep these two apart
+            next_listen: 0,
+            next_open: 1_000_000,
         }
     }
 
@@ -256,21 +297,26 @@ impl TaskData {
 
     /// Open a new socket with the given parameters.
     fn handle_bind(&mut self, msg: &ReqBind, reply_to: &super::MessageSender) {
-        let cfm = match net::TcpListener::bind((msg.addr.as_str(), msg.port)) {
-            Ok(x) => {
-                let h = self.last_listen;
-                self.last_listen += 1;
-                // Make a ListeningSocket object and pop it in the hashmap
-                self.listeners.insert(h,
-                                      ListeningSocket {
-                                          handle: h,
-                                          socket: x.try_clone().unwrap(),
-                                      });
-                // Send the response
-                CfmBind { result: Ok(h) }
-            }
-            Err(x) => CfmBind { result: Err(SocketError::IOError(x)) },
-        };
+        // let cfm = match net::TcpListener::bind((msg.addr.as_str(), msg.port)) {
+        //     Ok(x) => {
+        //         let h = self.next_listen;
+        //         self.next_listen += 1;
+        //         // Spawn a listen thread
+        //         let reply_to_copy = reply_to.clone();
+        //         let tcp_listener_copy = x.try_clone().unwrap();
+        //         let t = thread::spawn(move || listen(tcp_listener_copy, reply_to_copy));
+        //         // Make a ListeningSocket object and pop it in the hashmap
+        //         let l = ListeningSocket {
+        //             handle: h,
+        //             socket: x,
+        //             thread: t,
+        //         };
+        //         self.listeners.insert(h, l);
+        //         // Send the response
+        //         CfmBind { result: Ok(h) }
+        //     }
+        // };
+        let cfm = CfmBind { result: Err(SocketError::Unknown) };
         reply_to.send(cfm.wrap()).expect("Couldn't send message");
     }
 
@@ -299,6 +345,27 @@ impl TaskData {
             handle: msg.handle,
         };
         reply_to.send(cfm.wrap()).expect("Couldn't send message");
+    }
+}
+
+fn listen(listener: net::TcpListener, reply_to: super::MessageSender) {
+    for stream in listener.incoming() {
+        match stream {
+            // Spawn a connection thread
+            Ok(stream) => {
+                debug!("Connection! {:?}", stream);
+                // Inform the user about the connection
+                let ind = IndConnected {
+                    open_handle: 1,
+                    listen_handle: 2,
+                };
+                reply_to.send(ind.wrap()).expect("Failed to send!");
+                // thread::spawn(move || {
+                //    handle_client(stream, reply_to)
+                // });
+            }
+            Err(e) => debug!("Failed connection! {}", e),
+        }
     }
 }
 

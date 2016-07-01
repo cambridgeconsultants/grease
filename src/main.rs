@@ -6,6 +6,7 @@ extern crate time;
 
 use std::env;
 use std::thread;
+use std::time::Duration;
 
 use cuslip::{RequestSendable, socket};
 use env_logger::LogBuilder;
@@ -41,7 +42,7 @@ fn main() {
 
     let msg = socket::ReqBind {
         addr: "0.0.0.0".to_owned(),
-        port: 80,
+        port: 8000,
     };
 
     let (tx, rx) = cuslip::make_channel();
@@ -51,4 +52,10 @@ fn main() {
     let cfm = rx.recv().unwrap();
 
     info!("Got cfm: {:?}", cfm);
+
+    info!("Sleeping for 30 seconds...");
+
+    thread::sleep(Duration::new(30, 0));
+
+    info!("Bye!");
 }
