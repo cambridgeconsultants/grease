@@ -194,7 +194,8 @@ pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
           F: Send + 'static
 {
     let (sender, receiver) = make_channel();
-    let _ = thread::Builder::new().name(name.to_owned()).spawn(move || main_loop(receiver));
+    let angle_name = format!("<{}>", name);
+    let _ = thread::Builder::new().name(angle_name).spawn(move || main_loop(receiver));
     return sender;
 }
 

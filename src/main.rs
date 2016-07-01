@@ -19,8 +19,8 @@ fn format(record: &LogRecord) -> String {
     format!("{},{:03} - {:06} - {:10} - {}",
             time::strftime("%Y-%m-%d %H:%M:%S", &ts).unwrap(),
             ts.tm_nsec / 1_000_000,
-            thread_name,
             record.level(),
+            thread_name,
             record.args())
 }
 
@@ -39,7 +39,7 @@ fn main() {
 
     let socket_thread = socket::new();
 
-    let msg = socket::SocketReqOpen {
+    let msg = socket::ReqBind {
         addr: "0.0.0.0".to_owned(),
         port: 80,
     };
