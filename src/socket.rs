@@ -13,7 +13,8 @@
 // ****************************************************************************
 
 use std::thread;
-use super::{MessageRequest, Message, MessageSender, MessageConfirmation};
+use std::collections::HashMap;
+use super::{Request, Message, MessageSender, Confirmation, NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
 //
@@ -24,6 +25,7 @@ use super::{MessageRequest, Message, MessageSender, MessageConfirmation};
 /// Requests that can be sent to the Socket task
 /// We box all the parameters, in case any of the structs are large as we don't
 /// want to bloat the master Message type.
+#[derive(Debug)]
 pub enum SocketReq {
     /// Open a socket
     Open(Box<SocketReqOpen>),
@@ -34,57 +36,107 @@ pub enum SocketReq {
 }
 
 /// Opens a new socket.
+#[derive(Debug)]
 pub struct SocketReqOpen {
     /// The address to bind (e.g. "192.168.0.1")
-    addr: String,
+    pub addr: String,
     /// The TCP port to listen on (e.g. 8000)
-    port: u16,
+    pub port: u16,
+}
+
+/// Make SocketReqOpen sendable over a channel
+impl RequestSendable for SocketReqOpen {
+    fn wrap(self, reply_to: MessageSender) -> Message {
+        Message::Request(reply_to, Request::Socket(SocketReq::Open(Box::new(self))))
+    }
 }
 
 /// Closes a socket
+#[derive(Debug)]
 pub struct SocketReqClose {
     /// The handle from a SocketCfmOpen
-    handle: SocketHandle,
+    pub handle: SocketHandle,
+}
+
+/// Make SocketReqClose sendable over a channel
+impl RequestSendable for SocketReqClose {
+    fn wrap(self, reply_to: MessageSender) -> Message {
+        Message::Request(reply_to, Request::Socket(SocketReq::Close(Box::new(self))))
+    }
 }
 
 /// Sends data on a socket
+#[derive(Debug)]
 pub struct SocketReqSend {
     /// The handle from a SocketCfmOpen
-    handle: SocketHandle,
+    pub handle: SocketHandle,
     /// The data to be sent
     /// TODO should this be a u8 array of some sort?
-    msg: String,
+    pub msg: String,
+}
+
+/// Make SocketReqSend sendable over a channel
+impl RequestSendable for SocketReqSend {
+    fn wrap(self, reply_to: MessageSender) -> Message {
+        Message::Request(reply_to, Request::Socket(SocketReq::Send(Box::new(self))))
+    }
 }
 
 /// Confirmations sent from the Socket task in answer to a SocketReq
+#[derive(Debug)]
 pub enum SocketCfm {
     // Opened a socket
     Open(Box<SocketCfmOpen>),
     // Closed an open socket
-    Close(Box<SocketCloseCfm>),
+    Close(Box<SocketCfmClose>),
     // Sent something on a socket
     Send(Box<SocketSendCfm>),
 }
 
 /// Reply to a SocketReqOpen.
+#[derive(Debug)]
 pub struct SocketCfmOpen {
-    result: Result<SocketHandle, SocketError>,
+    pub result: Result<SocketHandle, SocketError>,
+}
+
+/// Make SocketCfmOpen sendable over a channel
+impl NonRequestSendable for SocketCfmOpen {
+    fn wrap(self) -> Message {
+        Message::Confirmation(Confirmation::Socket(SocketCfm::Open(Box::new(self))))
+    }
 }
 
 /// Reply to a SocketReqClose.
-pub struct SocketCloseCfm {
-    handle: SocketHandle,
-    result: Result<(), SocketError>,
+#[derive(Debug)]
+pub struct SocketCfmClose {
+    pub handle: SocketHandle,
+    pub result: Result<(), SocketError>,
+}
+
+/// Make SocketCfmClose sendable over a channel
+impl NonRequestSendable for SocketCfmClose {
+    fn wrap(self) -> Message {
+        Message::Confirmation(Confirmation::Socket(SocketCfm::Close(Box::new(self))))
+    }
 }
 
 /// Reply to a SocketReqSend. The data has not necessarily
 /// been sent, but it is safe to send some more data.
+#[derive(Debug)]
 pub struct SocketSendCfm {
-    handle: SocketHandle,
-    result: Result<(), SocketError>,
+    pub handle: SocketHandle,
+    pub result: Result<(), SocketError>,
+}
+
+/// Make SocketSendCfm sendable over a channel
+impl NonRequestSendable for SocketSendCfm {
+    fn wrap(self) -> Message {
+        Message::Confirmation(Confirmation::Socket(SocketCfm::Send(Box::new(self))))
+    }
 }
 
 /// Asynchronous indications sent by the Socket task
+#[derive(Debug)]
 pub enum SocketInd {
     // No more socket
     Dropped(Box<SocketIndDropped>),
@@ -93,14 +145,16 @@ pub enum SocketInd {
 }
 
 /// Indicates that a socket has been dropped.
+#[derive(Debug)]
 pub struct SocketIndDropped {
-    handle: SocketHandle, // reason?
+    pub handle: SocketHandle, // reason?
 }
 
 /// Indicates that data has arrived on the socket
+#[derive(Debug)]
 pub struct SocketIndReceived {
-    handle: SocketHandle,
-    data: String,
+    pub handle: SocketHandle,
+    pub data: String,
 }
 
 /// Uniquely identifies an open socket
@@ -121,7 +175,21 @@ pub enum SocketError {
 //
 // ****************************************************************************
 
-// None
+struct ListeningSocket {
+    addr: String,
+    port: u16,
+}
+
+struct ConnectedSocket {
+    addr: String,
+    port: u16,
+}
+
+struct TaskData {
+    listeners: HashMap<SocketHandle, ListeningSocket>,
+    connections: HashMap<SocketHandle, ConnectedSocket>,
+    last_handle: SocketHandle,
+}
 
 // ****************************************************************************
 //
@@ -151,67 +219,70 @@ pub fn make_thread() -> super::MessageSender {
 //
 // ****************************************************************************
 
+/// The task runs this main loop indefinitely.
 fn main_loop(rx: super::MessageReceiver) {
+    let mut t = TaskData::new();
     loop {
         let msg = rx.recv().unwrap();
         match msg {
-            Message::Request(reply_to, MessageRequest::Socket(x)) => handle_req(&x, &reply_to),
-            _ => panic!("Bad message!"),
+            // We only handle our own requests
+            Message::Request(reply_to, Request::Socket(x)) => t.handle_req(&x, &reply_to),
+            // We don't have any responses
+            // We don't expect any Indications or Confirmations
+            // Crash if another module has got it
+            _ => println!("Unexpected message in socket task: {:?}", msg),
         }
     }
 }
 
-/// Handle requests
-fn handle_req(msg: &SocketReq, reply_to: &MessageSender) {
-    println!("Got a socket request message!");
-    match *msg {
-        SocketReq::Open(ref x) => handle_open(&x, reply_to),
-        SocketReq::Close(ref x) => handle_close(&x, reply_to),
-        SocketReq::Send(ref x) => handle_send(&x, reply_to),
+impl TaskData {
+    /// Init the context
+    pub fn new() -> TaskData {
+        TaskData {
+            listeners: HashMap::new(),
+            connections: HashMap::new(),
+            last_handle: 0,
+        }
     }
-}
 
-/// Handle a SocketReqOpen.
-/// Creates a TcpListener then starts a thread to watch
-/// for connections. Each connection then starts a new thread.
-/// These threads use a clone of the reply_to field.
-fn handle_open(msg: &SocketReqOpen, reply_to: &MessageSender) {
-    println!("Got a socket open request. addr={}, port={}",
-             msg.addr,
-             msg.port);
-    let cfm = SocketCfmOpen { result: Err(SocketError::Unknown) };
-    let cfm =
-        Message::Confirmation(MessageConfirmation::Socket(SocketCfm::Open(Box::new(cfm))));
-    reply_to.send(cfm).expect("Couldn't send message");
-}
+    /// Handle requests
+    pub fn handle_req(&mut self, msg: &SocketReq, reply_to: &MessageSender) {
+        println!("Got a socket request message!");
+        match *msg {
+            SocketReq::Open(ref x) => self.handle_open(&x, reply_to),
+            SocketReq::Close(ref x) => self.handle_close(&x, reply_to),
+            SocketReq::Send(ref x) => self.handle_send(&x, reply_to),
+        }
+    }
 
-/// Handle a SocketReqClose.
-fn handle_close(msg: &SocketReqClose, reply_to: &MessageSender) {
-    println!("Got a socket close request. handle={}", msg.handle);
-    let cfm = SocketCloseCfm {
-        result: Err(SocketError::Unknown),
-        handle: msg.handle,
-    };
-    let cfm = Message::Confirmation(
-        MessageConfirmation::Socket(
-            SocketCfm::Close(
-                Box::new(cfm)
-            )
-        )
-    );
-    reply_to.send(cfm).expect("Couldn't send message");
-}
+    /// Open a new socket with the given parameters.
+    fn handle_open(&mut self, msg: &SocketReqOpen, reply_to: &MessageSender) {
+        println!("Got a socket open request. addr={}, port={}",
+                 msg.addr,
+                 msg.port);
+        let cfm = SocketCfmOpen { result: Err(SocketError::Unknown) };
+        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+    }
 
-/// Handle a SocketReqSend
-fn handle_send(msg: &SocketReqSend, reply_to: &MessageSender) {
-    println!("Got a socket send request. handle={}", msg.handle);
-    let cfm = SocketSendCfm {
-        result: Err(SocketError::Unknown),
-        handle: msg.handle,
-    };
-    let cfm =
-        Message::Confirmation(MessageConfirmation::Socket(SocketCfm::Send(Box::new(cfm))));
-    reply_to.send(cfm).expect("Couldn't send message");
+    /// Handle a SocketReqClose.
+    fn handle_close(&mut self, msg: &SocketReqClose, reply_to: &MessageSender) {
+        println!("Got a socket close request. handle={}", msg.handle);
+        let cfm = SocketCfmClose {
+            result: Err(SocketError::Unknown),
+            handle: msg.handle,
+        };
+        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+    }
+
+    /// Handle a SocketReqSend
+    fn handle_send(&mut self, msg: &SocketReqSend, reply_to: &MessageSender) {
+        println!("Got a socket send request. handle={}", msg.handle);
+        let cfm = SocketSendCfm {
+            result: Err(SocketError::Unknown),
+            handle: msg.handle,
+        };
+        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+    }
 }
 
 // ****************************************************************************
