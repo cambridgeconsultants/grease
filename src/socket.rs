@@ -13,7 +13,6 @@
 //
 // ****************************************************************************
 
-use std::thread;
 use std::collections::HashMap;
 use super::{NonRequestSendable, RequestSendable};
 
@@ -211,10 +210,8 @@ struct TaskData {
 
 /// Creates a new socket thread. Returns an object that can be used
 /// to send this thead messages.
-pub fn make_thread() -> super::MessageSender {
-    let (sender, receiver) = super::make_channel();
-    thread::spawn(move || main_loop(receiver));
-    return sender;
+pub fn new() -> super::MessageSender {
+    super::make_task("socket", main_loop)
 }
 
 // ****************************************************************************
@@ -236,7 +233,7 @@ fn main_loop(rx: super::MessageReceiver) {
             // We don't have any responses
             // We don't expect any Indications or Confirmations
             // Crash if another module has got it
-            _ => println!("Unexpected message in socket task: {:?}", msg),
+            _ => warn!("Unexpected message in socket task: {:?}", msg),
         }
     }
 }
@@ -253,7 +250,7 @@ impl TaskData {
 
     /// Handle requests
     pub fn handle_req(&mut self, msg: &SocketReq, reply_to: &super::MessageSender) {
-        println!("Got a socket request message!");
+        debug!("Got a socket request message!");
         match *msg {
             SocketReq::Open(ref x) => self.handle_open(&x, reply_to),
             SocketReq::Close(ref x) => self.handle_close(&x, reply_to),
@@ -263,16 +260,16 @@ impl TaskData {
 
     /// Open a new socket with the given parameters.
     fn handle_open(&mut self, msg: &SocketReqOpen, reply_to: &super::MessageSender) {
-        println!("Got a socket open request. addr={}, port={}",
-                 msg.addr,
-                 msg.port);
+        debug!("Got a socket open request. addr={}, port={}",
+               msg.addr,
+               msg.port);
         let cfm = SocketCfmOpen { result: Err(SocketError::Unknown) };
         reply_to.send(cfm.wrap()).expect("Couldn't send message");
     }
 
     /// Handle a SocketReqClose.
     fn handle_close(&mut self, msg: &SocketReqClose, reply_to: &super::MessageSender) {
-        println!("Got a socket close request. handle={}", msg.handle);
+        debug!("Got a socket close request. handle={}", msg.handle);
         let cfm = SocketCfmClose {
             result: Err(SocketError::Unknown),
             handle: msg.handle,
@@ -282,7 +279,7 @@ impl TaskData {
 
     /// Handle a SocketReqSend
     fn handle_send(&mut self, msg: &SocketReqSend, reply_to: &super::MessageSender) {
-        println!("Got a socket send request. handle={}", msg.handle);
+        debug!("Got a socket send request. handle={}", msg.handle);
         let cfm = SocketSendCfm {
             result: Err(SocketError::Unknown),
             handle: msg.handle,

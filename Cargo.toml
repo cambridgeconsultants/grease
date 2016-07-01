@@ -6,3 +6,8 @@ authors = ["theJPster <github@thejpster.org.uk>"]
 [[bin]]
 name = "example"
 doc = false
+
+[dependencies]
+log = "0.3"
+env_logger = "0.3"
+time = "0.1"

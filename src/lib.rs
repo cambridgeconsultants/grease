@@ -5,16 +5,8 @@
 //! For an high level overview to cuslip, see the project's README.md file.
 //!
 //! cuslip is a message-passing system, and messages are passed between tasks.
-//! Each task should be in its own module, and it should implement a
-//! `make_thread()` function, like this:
-//!
-//! ```
-//! pub fn make_thread() -> cuslip::MessageSender {
-//!     let (sender, receiver) = cuslip::make_channel();
-//!     thread::spawn(move || main_loop(receiver));
-//!     return sender;
-//! }
-//! ```
+//! Each task should be in its own module, and it should implement some sort
+//! of init function which calls `cuslip::make_task`.
 //!
 //! `main_loop` is a function which calls `recv()` on the given receiver object and
 //! performs the appropriate action when a message is received.
@@ -101,7 +93,12 @@
 //
 // ****************************************************************************
 
+#[macro_use]
+extern crate log;
+
 use std::sync::mpsc;
+use std::thread;
+
 pub mod socket;
 
 // ****************************************************************************
@@ -182,6 +179,24 @@ pub trait RequestSendable {
 // Public Functions
 //
 // ****************************************************************************
+
+/// Helper function to create a new thread.
+///
+/// ```
+/// fn main_loop(rx: super::MessageReceiver) {
+///     ...
+/// }
+/// ...
+/// super::make_task("foo", main_loop);
+/// ```
+pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
+    where F: FnOnce(MessageReceiver),
+          F: Send + 'static
+{
+    let (sender, receiver) = make_channel();
+    let _ = thread::Builder::new().name(name.to_owned()).spawn(move || main_loop(receiver));
+    return sender;
+}
 
 /// Helper function to create an mpsc channel pair.
 pub fn make_channel() -> (MessageSender, MessageReceiver) {
