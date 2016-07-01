@@ -40,10 +40,7 @@ fn main() {
 
     let socket_thread = socket::new();
 
-    let msg = socket::ReqBind {
-        addr: "0.0.0.0".to_owned(),
-        port: 8000,
-    };
+    let msg = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
 
     let (tx, rx) = cuslip::make_channel();
 
