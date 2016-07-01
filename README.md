@@ -27,10 +27,12 @@ Note that in all four cases, the primitives are defined by the *provider* and th
 
 In some cases, the *confirmation* for a *request* is fast - user requests provider sends some data, confirmation provider has received data for sending, time passes, provider indicates that sending is now complete. In other cases, the *confirmation* for a *request* is slow - user requests provider sends some data, time passes, provider confirms that data has now been sent. Deciding between these two models is something of an artform.
 
+Note, the assumption is that if a *user* sends a *provider* a *request*, the *user* _will_ get a *confirmation*. To significantly simplify the code there should be no error handling for the case that one doesn't arrive. *Providers* must ensure that the *confirmation* is either fast (sent immediately in the routine that processes the *request*), or gated on a *confirmation* from a subsequent *provider* below (which has the same constraints). If the *confirmation* is gated on, for example, an *indication* from a subsequent *provider* that might never arrive, then timeouts must be used.
+
 Often it is useful to describe these interaction via the medium of the Message Sequence Diagram.
 
 ```
-    Layer N +1         Layer N
+    Layer N+1         Layer N
        |                 |
        |      REQ        |
        |---------------->|
@@ -42,17 +44,15 @@ Often it is useful to describe these interaction via the medium of the Message S
        |<----------------|
        |                 |
        |      RSP        |
-       |---------------->|
+       | - - - - - - - ->|
        |                 |
 ```
 
-Each layer in the system is implemented as a thread. There are multiple classes of thread:
+Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task has a single multiple-producer, single-consumer (mpsc) channel. Both *Indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel. The helper function cuslip::make_channel() makes an std::sync::mpsc::Channel of the correct type.
 
-* SingleQueueThread. Has a single queue. INDs and CFMs from providers are sent to this queue, as are REQs from any users above.
-* DoubleQueueThread. Has separate queues for providers and users. Allows the user queue to be handled singly - that is, pop a single REQ off, handle it with multiple REQ/CFM pairs to the provider below, then CFM the user's REQ, and only then pop the next REQ.
+# Example Application
 
-We'll start with the SingleQueueThread as it is simpler to implement.
-
+To demonstrate the system, it includes the following example tasks:
 
 ```
 +---------------------------+
@@ -73,8 +73,6 @@ We'll start with the SingleQueueThread as it is simpler to implement.
 ## Proto
 
 Proto is a noddy protocol I've invented which you can speak over any sort of stream. In this system, you could replace Socket with Serial and it would still work. Whether you can generically implement a Stream in both the Socket and Serial tasks such that ProtoServer didn't care which you used (yet where they still maintain their unique connection properties) is something I tend to explore later.
-
-PS: I know there's an AT command implementation in the source code at the moment. That was a first draft and I'll probably change it.
 
 ### Commands
 
