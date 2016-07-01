@@ -1,8 +1,9 @@
 //! # cuslip Sockets
 //!
-//! The cuslip socket thread makes handling sockets easier. You request the
-//! thread to open a new socket and it does so (if possible). Your thread then
-//! receives asynchronous indications when data arrives on the socket.
+//! The cuslip socket thread makes handling sockets easier. A user requests the
+//! socket task opens a new socket and it does so (if possible). The user then
+//! receives asynchronous indications when data arrives on the socket and/or
+//! when the socket closes.
 
 #![allow(dead_code)]
 
@@ -14,7 +15,7 @@
 
 use std::thread;
 use std::collections::HashMap;
-use super::{Request, Message, MessageSender, Confirmation, NonRequestSendable, RequestSendable};
+use super::{NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
 //
@@ -24,7 +25,7 @@ use super::{Request, Message, MessageSender, Confirmation, NonRequestSendable, R
 
 /// Requests that can be sent to the Socket task
 /// We box all the parameters, in case any of the structs are large as we don't
-/// want to bloat the master Message type.
+/// want to bloat the mastersuper::Message super::type.
 #[derive(Debug)]
 pub enum SocketReq {
     /// Open a socket
@@ -45,9 +46,10 @@ pub struct SocketReqOpen {
 }
 
 /// Make SocketReqOpen sendable over a channel
-impl RequestSendable for SocketReqOpen {
-    fn wrap(self, reply_to: MessageSender) -> Message {
-        Message::Request(reply_to, Request::Socket(SocketReq::Open(Box::new(self))))
+impl super::RequestSendable for SocketReqOpen {
+    fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
+        super::Message::Request(reply_to.clone(),
+                                super::Request::Socket(SocketReq::Open(Box::new(self))))
     }
 }
 
@@ -59,9 +61,10 @@ pub struct SocketReqClose {
 }
 
 /// Make SocketReqClose sendable over a channel
-impl RequestSendable for SocketReqClose {
-    fn wrap(self, reply_to: MessageSender) -> Message {
-        Message::Request(reply_to, Request::Socket(SocketReq::Close(Box::new(self))))
+impl super::RequestSendable for SocketReqClose {
+    fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
+        super::Message::Request(reply_to.clone(),
+                                super::Request::Socket(SocketReq::Close(Box::new(self))))
     }
 }
 
@@ -76,9 +79,10 @@ pub struct SocketReqSend {
 }
 
 /// Make SocketReqSend sendable over a channel
-impl RequestSendable for SocketReqSend {
-    fn wrap(self, reply_to: MessageSender) -> Message {
-        Message::Request(reply_to, Request::Socket(SocketReq::Send(Box::new(self))))
+impl super::RequestSendable for SocketReqSend {
+    fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
+        super::Message::Request(reply_to.clone(),
+                                super::Request::Socket(SocketReq::Send(Box::new(self))))
     }
 }
 
@@ -100,9 +104,9 @@ pub struct SocketCfmOpen {
 }
 
 /// Make SocketCfmOpen sendable over a channel
-impl NonRequestSendable for SocketCfmOpen {
-    fn wrap(self) -> Message {
-        Message::Confirmation(Confirmation::Socket(SocketCfm::Open(Box::new(self))))
+impl super::NonRequestSendable for SocketCfmOpen {
+    fn wrap(self) -> super::Message {
+        super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Open(Box::new(self))))
     }
 }
 
@@ -114,9 +118,9 @@ pub struct SocketCfmClose {
 }
 
 /// Make SocketCfmClose sendable over a channel
-impl NonRequestSendable for SocketCfmClose {
-    fn wrap(self) -> Message {
-        Message::Confirmation(Confirmation::Socket(SocketCfm::Close(Box::new(self))))
+impl super::NonRequestSendable for SocketCfmClose {
+    fn wrap(self) -> super::Message {
+        super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Close(Box::new(self))))
     }
 }
 
@@ -129,9 +133,9 @@ pub struct SocketSendCfm {
 }
 
 /// Make SocketSendCfm sendable over a channel
-impl NonRequestSendable for SocketSendCfm {
-    fn wrap(self) -> Message {
-        Message::Confirmation(Confirmation::Socket(SocketCfm::Send(Box::new(self))))
+impl super::NonRequestSendable for SocketSendCfm {
+    fn wrap(self) -> super::Message {
+        super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Send(Box::new(self))))
     }
 }
 
@@ -226,7 +230,9 @@ fn main_loop(rx: super::MessageReceiver) {
         let msg = rx.recv().unwrap();
         match msg {
             // We only handle our own requests
-            Message::Request(reply_to, Request::Socket(x)) => t.handle_req(&x, &reply_to),
+            super::Message::Request(reply_to, super::Request::Socket(x)) => {
+                t.handle_req(&x, &reply_to)
+            }
             // We don't have any responses
             // We don't expect any Indications or Confirmations
             // Crash if another module has got it
@@ -246,7 +252,7 @@ impl TaskData {
     }
 
     /// Handle requests
-    pub fn handle_req(&mut self, msg: &SocketReq, reply_to: &MessageSender) {
+    pub fn handle_req(&mut self, msg: &SocketReq, reply_to: &super::MessageSender) {
         println!("Got a socket request message!");
         match *msg {
             SocketReq::Open(ref x) => self.handle_open(&x, reply_to),
@@ -256,7 +262,7 @@ impl TaskData {
     }
 
     /// Open a new socket with the given parameters.
-    fn handle_open(&mut self, msg: &SocketReqOpen, reply_to: &MessageSender) {
+    fn handle_open(&mut self, msg: &SocketReqOpen, reply_to: &super::MessageSender) {
         println!("Got a socket open request. addr={}, port={}",
                  msg.addr,
                  msg.port);
@@ -265,7 +271,7 @@ impl TaskData {
     }
 
     /// Handle a SocketReqClose.
-    fn handle_close(&mut self, msg: &SocketReqClose, reply_to: &MessageSender) {
+    fn handle_close(&mut self, msg: &SocketReqClose, reply_to: &super::MessageSender) {
         println!("Got a socket close request. handle={}", msg.handle);
         let cfm = SocketCfmClose {
             result: Err(SocketError::Unknown),
@@ -275,7 +281,7 @@ impl TaskData {
     }
 
     /// Handle a SocketReqSend
-    fn handle_send(&mut self, msg: &SocketReqSend, reply_to: &MessageSender) {
+    fn handle_send(&mut self, msg: &SocketReqSend, reply_to: &super::MessageSender) {
         println!("Got a socket send request. handle={}", msg.handle);
         let cfm = SocketSendCfm {
             result: Err(SocketError::Unknown),

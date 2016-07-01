@@ -16,7 +16,7 @@ fn main() {
 
     let (tx, rx) = cuslip::make_channel();
 
-    socket_thread.send(msg.wrap(tx)).unwrap();
+    socket_thread.send(msg.wrap(&tx)).unwrap();
 
     let cfm = rx.recv().unwrap();
 
