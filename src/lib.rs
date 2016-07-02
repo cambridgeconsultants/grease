@@ -122,6 +122,7 @@ pub enum Message {
     Request(MessageSender, Request),
     Confirmation(Confirmation),
     Indication(Indication),
+    Response(Response),
 }
 
 /// The set of all requests in the system.
@@ -143,6 +144,13 @@ pub enum Confirmation {
 #[derive(Debug)]
 pub enum Indication {
     Socket(socket::SocketInd),
+}
+
+/// The set of all responses in the system.
+/// This is an enumeration of all the interfaces.
+#[derive(Debug)]
+pub enum Response {
+    Socket(socket::SocketRsp),
 }
 
 /// Implementors of the NonRequestSendable trait can be easily wrapped in a message

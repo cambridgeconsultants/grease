@@ -6,9 +6,8 @@ extern crate time;
 
 use std::env;
 use std::thread;
-use std::time::Duration;
 
-use cuslip::{RequestSendable, socket};
+use cuslip::{RequestSendable, NonRequestSendable, socket};
 use env_logger::LogBuilder;
 use log::{LogRecord, LogLevelFilter};
 
@@ -39,20 +38,25 @@ fn main() {
     info!("It's what you put on threads when you have rust issues...");
 
     let socket_thread = socket::new();
-
-    let msg = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
-
     let (tx, rx) = cuslip::make_channel();
 
+    let msg = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
     socket_thread.send(msg.wrap(&tx)).unwrap();
-
     let cfm = rx.recv().unwrap();
+    info!("Got cfm for 8000 bind: {:?}", cfm);
 
-    info!("Got cfm: {:?}", cfm);
+    let msg = socket::ReqBind { addr: "0.0.0.0:8001".parse().unwrap() };
+    socket_thread.send(msg.wrap(&tx)).unwrap();
+    let cfm = rx.recv().unwrap();
+    info!("Got cfm for 8001 bind: {:?}", cfm);
 
-    info!("Sleeping for 30 seconds...");
-
-    thread::sleep(Duration::new(30, 0));
-
-    info!("Bye!");
+    loop {
+        let ind = rx.recv().unwrap();
+        info!("Got msg: {:?}", ind);
+        if let cuslip::Message::Indication(cuslip::Indication::Socket(socket::SocketInd::Received(x))) =
+               ind {
+            let rsp = socket::RspReceived { handle: x.handle };
+            socket_thread.send(rsp.wrap()).unwrap();
+        }
+    }
 }
