@@ -15,7 +15,7 @@
 
 use mio::prelude::*;
 use mio;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::prelude::*;
 use std::io;
 use std::thread;
@@ -88,8 +88,10 @@ pub struct ReqClose {
 pub struct ReqSend {
     /// The handle from a CfmBind
     pub handle: ConnectedHandle,
+    /// Some (maybe) unique identifier
+    pub context: WriteContext,
     /// The data to be sent
-    pub msg: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// Reply to a ReqBind.
@@ -121,6 +123,8 @@ pub struct CfmClose {
 pub struct CfmSend {
     pub handle: ConnectedHandle,
     pub result: Result<(), SocketError>,
+    /// Some (maybe) unique identifier
+    pub context: WriteContext,
 }
 
 /// Indicates that a listening socket has been connected to.
@@ -164,11 +168,16 @@ pub type ListenHandle = usize;
 /// Uniquely identifies an open socket
 pub type ConnectedHandle = usize;
 
+/// Allows a user to track multiple writes
+pub type WriteContext = usize;
+
 /// All possible errors the Socket task might want to
 /// report.
 #[derive(Debug)]
 pub enum SocketError {
     IOError(io::Error),
+    BadHandle,
+    Dropped,
     BadAddress,
     Timeout,
     Unknown,
@@ -189,13 +198,22 @@ struct ListenSocket {
     listener: mio::tcp::TcpListener,
 }
 
+/// Create for every pending write
+struct PendingWrite {
+    context: WriteContext,
+    data: Vec<u8>,
+}
+
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
     parent: ListenHandle,
     reply_to: super::MessageSender,
     handle: ConnectedHandle,
     connection: mio::tcp::TcpStream,
+    /// There's a read the user hasn't process yet
     outstanding: bool,
+    /// Queue of pending writes
+    pending_writes: VecDeque<PendingWrite>,
 }
 
 /// One instance per task. Stores all the task data.
@@ -262,11 +280,14 @@ fn main_loop(rx: super::MessageReceiver) {
     panic!("This task should never die!");
 }
 
+/// These are our mio callbacks. They are called by the mio EventLoop
+/// when interesting things happen. We deal with the interesting thing, then
+/// the EventLoop calls another callback or waits for more interesting things.
 impl mio::Handler for TaskContext {
     type Timeout = u32;
     type Message = super::Message;
 
-    /// Called when mio has an updated on a registered listener or connection
+    /// Called when mio has an update on a registered listener or connection
     /// We have to check the EventSet to find out whether our socket is
     /// readable or writable
     fn ready(&mut self, event_loop: &mut TaskEventLoop, token: mio::Token, events: mio::EventSet) {
@@ -277,7 +298,36 @@ impl mio::Handler for TaskContext {
             } else if self.connections.contains_key(&handle) {
                 self.read(event_loop, handle)
             } else {
-                warn!("Ready on unknown token {}", handle);
+                warn!("Readable on unknown token {}", handle);
+            }
+        }
+        if events.is_writable() {
+            if self.listeners.contains_key(&handle) {
+                debug!("Writable listen socket {}?", handle);
+            } else if self.connections.contains_key(&handle) {
+                debug!("Writable connected socket {}", handle);
+                self.pending_writes(event_loop, handle);
+            } else {
+                warn!("Writable on unknown token {}", handle);
+            }
+        }
+        if events.is_error() {
+            if self.listeners.contains_key(&handle) {
+                debug!("Error listen socket {}", handle);
+            } else if self.connections.contains_key(&handle) {
+                debug!("Error connected socket {}", handle);
+            } else {
+                warn!("Error on unknown token {}", handle);
+            }
+        }
+        if events.is_hup() {
+            if self.listeners.contains_key(&handle) {
+                debug!("HUP listen socket {}", handle);
+            } else if self.connections.contains_key(&handle) {
+                debug!("HUP connected socket {}", handle);
+                self.dropped(event_loop, handle);
+            } else {
+                warn!("HUP on unknown token {}", handle);
             }
         }
     }
@@ -338,11 +388,14 @@ impl TaskContext {
                 reply_to: ls.reply_to.clone(),
                 connection: conn_addr.0,
                 outstanding: false,
+                pending_writes: VecDeque::new(),
             };
             self.next_open += 1;
             match event_loop.register(&cs.connection,
                                       mio::Token(cs.handle),
-                                      mio::EventSet::readable(),
+                                      mio::EventSet::readable() | mio::EventSet::hup() |
+                                      mio::EventSet::error() |
+                                      mio::EventSet::writable(),
                                       mio::PollOpt::edge()) {
                 Ok(_) => {
                     let msg = IndConnected {
@@ -353,10 +406,48 @@ impl TaskContext {
                     self.connections.insert(cs.handle, cs);
                     ls.reply_to.send(msg.wrap());
                 }
-                Err(io_error) => debug!("Fumbled incoming connection"),
+                Err(err) => debug!("Fumbled incoming connection: {}", err),
             }
         } else {
             warn!("accept returned None!");
+        }
+    }
+
+    /// Data can be sent a connected socket. Send what we have
+    fn pending_writes(&mut self, event_loop: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+        // We know this exists because we checked it before we got here
+        let mut cs = self.connections.get_mut(&cs_handle).unwrap();
+        if let Some(mut pw) = cs.pending_writes.pop_front() {
+            let to_send = pw.data.len();
+            match cs.connection.write(&pw.data) {
+                Ok(len) if len < to_send => {
+                    debug!("Sent {} of {}", len, to_send);
+                    let pw = PendingWrite {
+                        context: pw.context,
+                        data: pw.data.split_off(len),
+                    };
+                    cs.pending_writes.push_front(pw);
+                    // No indication here - we wait some more
+                }
+                Ok(_) => {
+                    debug!("Sent it all");
+                    let cfm = CfmSend {
+                        handle: cs.handle,
+                        context: pw.context,
+                        result: Ok(()),
+                    };
+                    cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                }
+                Err(err) => {
+                    warn!("Send error: {}", err);
+                    let cfm = CfmSend {
+                        handle: cs.handle,
+                        context: pw.context,
+                        result: Err(SocketError::IOError(err)),
+                    };
+                    cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                }
+            }
         }
     }
 
@@ -381,32 +472,20 @@ impl TaskContext {
                     cs.outstanding = true;
                     cs.reply_to.send(ind.wrap()).expect("Failed to send");
                 }
-                Err(err) => warn!("Failed to read! {}", err),
+                Err(err) => debug!("Failed to read: {}", err),
             }
         }
     }
 
-    /// Handle responses
-    pub fn handle_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
-        debug!("request: {:?}", msg);
-        match *msg {
-            SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
+    /// Connection has gone away. Clean up.
+    fn dropped(&mut self, event_loop: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+        // We know this exists because we checked it before we got here
+        {
+            let cs = self.connections.get(&cs_handle).unwrap();
+            let msg = IndDropped { handle: cs_handle };
+            cs.reply_to.send(msg.wrap()).expect("Unable to send message");
         }
-    }
-
-    /// Someone wants more data
-    fn handle_received(&mut self, event_loop: &mut TaskEventLoop, msg: &RspReceived) {
-        let mut need_read = false;
-        if let Some(cs) = self.connections.get_mut(&msg.handle) {
-            cs.outstanding = false;
-            // Let's try and send them some - if if exhausts the
-            // buffer on the socket, the event loop will automatically
-            // set itself to interrupt when more data arrives
-            need_read = true;
-        }
-        if need_read {
-            self.read(event_loop, msg.handle)
-        }
+        self.connections.remove(&cs_handle);
     }
 
     /// Handle requests
@@ -484,11 +563,95 @@ impl TaskContext {
                    event_loop: &mut TaskEventLoop,
                    msg: &ReqSend,
                    reply_to: &super::MessageSender) {
-        let cfm = CfmSend {
-            result: Err(SocketError::Unknown),
-            handle: msg.handle,
-        };
-        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+        if let Some(cs) = self.connections.get_mut(&msg.handle) {
+            let to_send = msg.data.len();
+            // Let's see how much we can get rid off right now
+            if cs.pending_writes.len() > 0 {
+                debug!("Storing write");
+                let pw = PendingWrite {
+                    context: msg.context,
+                    data: msg.data.clone(),
+                };
+                cs.pending_writes.push_back(pw);
+                // No cfm here - we wait
+            } else {
+                match cs.connection.write(&msg.data) {
+                    Ok(len) if len < to_send => {
+                        debug!("Sent {} of {}", len, to_send);
+                        let pw = PendingWrite {
+                            context: msg.context,
+                            data: msg.data.clone().split_off(len),
+                        };
+                        cs.pending_writes.push_back(pw);
+                        // No cfm here - we wait
+                    }
+                    Ok(_) => {
+                        debug!("Sent it all");
+                        let cfm = CfmSend {
+                            context: msg.context,
+                            handle: msg.handle,
+                            result: Ok(()),
+                        };
+                        cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                    }
+                    Err(err) => {
+                        warn!("Send error: {}", err);
+                        let cfm = CfmSend {
+                            context: msg.context,
+                            handle: msg.handle,
+                            result: Err(SocketError::IOError(err)),
+                        };
+                        cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                    }
+                }
+            }
+        } else {
+            let cfm = CfmSend {
+                result: Err(SocketError::BadHandle),
+                context: msg.context,
+                handle: msg.handle,
+            };
+            reply_to.send(cfm.wrap()).expect("Couldn't send message");
+        }
+    }
+
+    /// Handle responses
+    pub fn handle_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
+        debug!("request: {:?}", msg);
+        match *msg {
+            SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
+        }
+    }
+
+    /// Someone wants more data
+    fn handle_received(&mut self, event_loop: &mut TaskEventLoop, msg: &RspReceived) {
+        let mut need_read = false;
+        // Read response handle might not be valid - it might
+        // have crossed over with a disconnect.
+        if let Some(cs) = self.connections.get_mut(&msg.handle) {
+            cs.outstanding = false;
+            // Let's try and send them some - if if exhausts the
+            // buffer on the socket, the event loop will automatically
+            // set itself to interrupt when more data arrives
+            need_read = true;
+        }
+        if need_read {
+            // Try and read it - won't hurt if we can't.
+            self.read(event_loop, msg.handle)
+        }
+    }
+}
+
+impl Drop for ConnectedSocket {
+    fn drop(&mut self) {
+        for pw in self.pending_writes.iter() {
+            let cfm = CfmSend {
+                handle: self.handle,
+                context: pw.context,
+                result: Err(SocketError::Dropped),
+            };
+            self.reply_to.send(cfm.wrap()).expect("Unable to send");
+        }
     }
 }
 

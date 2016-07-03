@@ -40,23 +40,29 @@ fn main() {
     let socket_thread = socket::new();
     let (tx, rx) = cuslip::make_channel();
 
-    let msg = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
-    socket_thread.send(msg.wrap(&tx)).unwrap();
-    let cfm = rx.recv().unwrap();
-    info!("Got cfm for 8000 bind: {:?}", cfm);
+    let bind_req = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
+    socket_thread.send(bind_req.wrap(&tx)).unwrap();
+    let bind_cfm = rx.recv().unwrap();
+    info!("Got cfm for 8000 bind: {:?}", bind_cfm);
 
-    let msg = socket::ReqBind { addr: "0.0.0.0:8001".parse().unwrap() };
-    socket_thread.send(msg.wrap(&tx)).unwrap();
-    let cfm = rx.recv().unwrap();
-    info!("Got cfm for 8001 bind: {:?}", cfm);
+    let bind_req = socket::ReqBind { addr: "0.0.0.0:8001".parse().unwrap() };
+    socket_thread.send(bind_req.wrap(&tx)).unwrap();
+    let bind_cfm = rx.recv().unwrap();
+    info!("Got cfm for 8001 bind: {:?}", bind_cfm);
+
+    let mut n: cuslip::socket::WriteContext = 0;
 
     loop {
         let ind = rx.recv().unwrap();
         info!("Got msg: {:?}", ind);
-        if let cuslip::Message::Indication(cuslip::Indication::Socket(socket::SocketInd::Received(x))) =
-               ind {
-            let rsp = socket::RspReceived { handle: x.handle };
-            socket_thread.send(rsp.wrap()).unwrap();
+        if let cuslip::Message::Indication(
+            cuslip::Indication::Socket(
+                socket::SocketInd::Received(x))) = ind {
+            let recv_rsp = socket::RspReceived { handle: x.handle };
+            socket_thread.send(recv_rsp.wrap()).unwrap();
+            let send_req = socket::ReqSend { handle: x.handle, data: x.data.clone(), context: n };
+            socket_thread.send(send_req.wrap(&tx)).unwrap();
+            n = n + 1;
         }
     }
 }
