@@ -272,7 +272,7 @@ struct TaskContext {
 //
 // ****************************************************************************
 
-const MAX_READ_LEN: usize = 64;
+const MAX_READ_LEN: usize = 1;
 
 // ****************************************************************************
 //
@@ -443,36 +443,43 @@ impl TaskContext {
     fn pending_writes(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
         // We know this exists because we checked it before we got here
         let mut cs = self.connections.get_mut(&cs_handle).unwrap();
-        if let Some(mut pw) = cs.pending_writes.pop_front() {
-            let to_send = pw.data.len();
-            match cs.connection.write(&pw.data) {
-                Ok(len) if len < to_send => {
-                    debug!("Sent {} of {}", len, to_send);
-                    let pw = PendingWrite {
-                        context: pw.context,
-                        data: pw.data.split_off(len),
-                    };
-                    cs.pending_writes.push_front(pw);
-                    // No indication here - we wait some more
+        loop {
+            if let Some(mut pw) = cs.pending_writes.pop_front() {
+                let to_send = pw.data.len();
+                match cs.connection.write(&pw.data) {
+                    Ok(len) if len < to_send => {
+                        let left = to_send - len;
+                        warn!("Sent {} of {}, leaving {}", len, to_send, left);
+                        let pw = PendingWrite {
+                            context: pw.context,
+                            data: pw.data.split_off(len),
+                        };
+                        cs.pending_writes.push_front(pw);
+                        // No indication here - we wait some more
+                        break;
+                    }
+                    Ok(_) => {
+                        debug!("Sent all {}", to_send);
+                        let cfm = CfmSend {
+                            handle: cs.handle,
+                            context: pw.context,
+                            result: Ok(()),
+                        };
+                        cs.reply_to.send(cfm.wrap()).unwrap();
+                    }
+                    Err(err) => {
+                        warn!("Send error: {}", err);
+                        let cfm = CfmSend {
+                            handle: cs.handle,
+                            context: pw.context,
+                            result: Err(SocketError::IOError(err)),
+                        };
+                        cs.reply_to.send(cfm.wrap()).unwrap();
+                        break;
+                    }
                 }
-                Ok(_) => {
-                    debug!("Sent it all");
-                    let cfm = CfmSend {
-                        handle: cs.handle,
-                        context: pw.context,
-                        result: Ok(()),
-                    };
-                    cs.reply_to.send(cfm.wrap()).unwrap();
-                }
-                Err(err) => {
-                    warn!("Send error: {}", err);
-                    let cfm = CfmSend {
-                        handle: cs.handle,
-                        context: pw.context,
-                        result: Err(SocketError::IOError(err)),
-                    };
-                    cs.reply_to.send(cfm.wrap()).unwrap();
-                }
+            } else {
+                break;
             }
         }
     }
@@ -592,7 +599,7 @@ impl TaskContext {
             let to_send = msg.data.len();
             // Let's see how much we can get rid off right now
             if cs.pending_writes.len() > 0 {
-                debug!("Storing write");
+                warn!("Storing write");
                 let pw = PendingWrite {
                     context: msg.context,
                     data: msg.data.clone(),
@@ -602,7 +609,8 @@ impl TaskContext {
             } else {
                 match cs.connection.write(&msg.data) {
                     Ok(len) if len < to_send => {
-                        debug!("Sent {} of {}", len, to_send);
+                        let left = to_send - len;
+                        warn!("Sent {} of {}, leaving {}", len, to_send, left);
                         let pw = PendingWrite {
                             context: msg.context,
                             data: msg.data.clone().split_off(len),
@@ -611,7 +619,7 @@ impl TaskContext {
                         // No cfm here - we wait
                     }
                     Ok(_) => {
-                        debug!("Sent it all");
+                        debug!("Sent all {}", to_send);
                         let cfm = CfmSend {
                             context: msg.context,
                             handle: msg.handle,

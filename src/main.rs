@@ -16,11 +16,13 @@ fn format(record: &LogRecord) -> String {
     let ts = time::now();
     let thread_id = thread::current();
     let thread_name = thread_id.name().unwrap_or("<??>");
-    format!("{},{:03} - {:06} - {:10} - {}",
+    format!("{},{:03} - {:06} - {:10} - {}:{} - {}",
             time::strftime("%Y-%m-%d %H:%M:%S", &ts).unwrap(),
             ts.tm_nsec / 1_000_000,
             record.level(),
             thread_name,
+            record.location().file(),
+            record.location().line(),
             record.args())
 }
 
@@ -60,7 +62,8 @@ fn main() {
                 socket::SocketInd::Received(x))) = ind {
             let recv_rsp = socket::RspReceived { handle: x.handle };
             socket_thread.send(recv_rsp.wrap()).unwrap();
-            let send_req = socket::ReqSend { handle: x.handle, data: x.data.clone(), context: n };
+            let reply_data = vec![0x30u8; 16 * 1024*1024];
+            let send_req = socket::ReqSend { handle: x.handle, data: reply_data, context: n };
             socket_thread.send(send_req.wrap(&tx)).unwrap();
             n = n + 1;
         }
