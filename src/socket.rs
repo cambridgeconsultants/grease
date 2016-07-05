@@ -6,6 +6,7 @@
 //! when the socket closes.
 
 #![allow(dead_code)]
+#![deny(missing_docs)]
 
 // ****************************************************************************
 //
@@ -13,13 +14,16 @@
 //
 // ****************************************************************************
 
-use mio::prelude::*;
-use mio;
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::io::prelude::*;
 use std::io;
-use std::thread;
 use std::net;
+use std::thread;
+
+use mio::prelude::*;
+use mio;
+
 use super::{NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
@@ -33,32 +37,44 @@ use super::{NonRequestSendable, RequestSendable};
 /// want to bloat the master Message type.
 #[derive(Debug)]
 pub enum SocketReq {
+    /// A Bind Request - Bind a listen socket
     Bind(Box<ReqBind>),
+    /// An Unbind Request - Unbind a bound listen socket
     Unbind(Box<ReqUnbind>),
+    /// A Close request - Close an open connection
     Close(Box<ReqClose>),
+    /// A Send request - Send something on a connection
     Send(Box<ReqSend>),
 }
 
 /// Confirmations sent from the Socket task in answer to a SocketReq
 #[derive(Debug)]
 pub enum SocketCfm {
+    /// A Bind Confirm - Bound a listen socket
     Bind(Box<CfmBind>),
+    /// An Unbind Confirm - Unbound a bound listen socket
     Unbind(Box<CfmUnbind>),
+    /// A Close Confirm - Closed an open connection
     Close(Box<CfmClose>),
+    /// A Send Confirm - Sent something on a connection
     Send(Box<CfmSend>),
 }
 
 /// Asynchronous indications sent by the Socket task
 #[derive(Debug)]
 pub enum SocketInd {
+    /// A Connected Indication - Indicates that a listening socket has been connected to
     Connected(Box<IndConnected>),
+    /// A Dropped Indication - Indicates that an open socket has been dropped
     Dropped(Box<IndDropped>),
+    /// A Received Indication - Indicates that data has arrived on an open socket
     Received(Box<IndReceived>),
 }
 
 /// Responses to Indications required
 #[derive(Debug)]
 pub enum SocketRsp {
+    /// a Receieved Response - unblocks the open socket so more IndReceived can be sent
     Received(Box<RspReceived>),
 }
 
@@ -84,7 +100,6 @@ pub struct ReqClose {
 }
 
 /// Send something on a connection
-#[derive(Debug)]
 pub struct ReqSend {
     /// The handle from a CfmBind
     pub handle: ConnectedHandle,
@@ -97,6 +112,7 @@ pub struct ReqSend {
 /// Reply to a ReqBind.
 #[derive(Debug)]
 pub struct CfmBind {
+    /// Either a new ListenHandle or an error
     pub result: Result<ListenHandle, SocketError>,
 }
 
@@ -113,7 +129,9 @@ pub struct CfmUnbind {
 /// existing data.
 #[derive(Debug)]
 pub struct CfmClose {
+    /// The handle requested for closing
     pub handle: ConnectedHandle,
+    /// Success or failed
     pub result: Result<(), SocketError>,
 }
 
@@ -121,7 +139,9 @@ pub struct CfmClose {
 /// been sent, but it is safe to send some more data.
 #[derive(Debug)]
 pub struct CfmSend {
+    /// The handle requested for sending
     pub handle: ConnectedHandle,
+    /// Success or otherwise
     pub result: Result<(), SocketError>,
     /// Some (maybe) unique identifier
     pub context: WriteContext,
@@ -130,29 +150,37 @@ pub struct CfmSend {
 /// Indicates that a listening socket has been connected to.
 #[derive(Debug)]
 pub struct IndConnected {
+    /// The listen handle the connection came in on
     pub listen_handle: ListenHandle,
+    /// The handle for the new connection
     pub open_handle: ConnectedHandle,
+    /// Details about who connected
     pub peer: net::SocketAddr,
 }
 
 /// Indicates that a socket has been dropped.
 #[derive(Debug)]
 pub struct IndDropped {
+    /// The handle that is no longer valid
     pub handle: ConnectedHandle,
 }
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
-/// RspReceived is sent back.
-#[derive(Debug)]
+/// RspReceived is sent back. Note that this type
+/// has a custom std::fmt::Debug implementation so it
+/// doesn't print the (lengthy) contents of `data`.
 pub struct IndReceived {
+    /// The handle for the socket data came in on
     pub handle: ConnectedHandle,
+    /// The data that came in (might be a limited to a small amount)
     pub data: Vec<u8>,
 }
 
 /// Tell the task that more data can now be sent.
 #[derive(Debug)]
 pub struct RspReceived {
+    /// Which handle is now free to send up more data
     pub handle: ConnectedHandle,
 }
 
@@ -175,12 +203,14 @@ pub type WriteContext = usize;
 /// report.
 #[derive(Debug)]
 pub enum SocketError {
+    /// An underlying socket error
     IOError(io::Error),
+    /// The given handle was not recognised
     BadHandle,
+    /// The pending write failed because the socket dropped
     Dropped,
-    BadAddress,
-    Timeout,
-    Unknown,
+    /// Function not implemented yet
+    NotImplemented,
 }
 
 // ****************************************************************************
@@ -348,20 +378,16 @@ impl mio::Handler for TaskContext {
     }
 
     /// Should never be called - we don't have a timeout on our poll
-    fn timeout(&mut self, event_loop: &mut TaskEventLoop, timeout: Self::Timeout) {
+    fn timeout(&mut self, _: &mut TaskEventLoop, _: Self::Timeout) {
         unimplemented!();
     }
 
     /// Not sure when this is called
-    fn interrupted(&mut self, event_loop: &mut TaskEventLoop) {
-        warn!("Interrupted!");
-    }
+    fn interrupted(&mut self, _: &mut TaskEventLoop) {}
 
     /// Not sure when this is called but I don't think we need to
     /// do anything
-    fn tick(&mut self, event_loop: &mut TaskEventLoop) {
-        debug!("Tick!");
-    }
+    fn tick(&mut self, _: &mut TaskEventLoop) {}
 }
 
 impl TaskContext {
@@ -404,7 +430,7 @@ impl TaskContext {
                         peer: conn_addr.1,
                     };
                     self.connections.insert(cs.handle, cs);
-                    ls.reply_to.send(msg.wrap());
+                    ls.reply_to.send(msg.wrap()).unwrap();
                 }
                 Err(err) => debug!("Fumbled incoming connection: {}", err),
             }
@@ -414,7 +440,7 @@ impl TaskContext {
     }
 
     /// Data can be sent a connected socket. Send what we have
-    fn pending_writes(&mut self, event_loop: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+    fn pending_writes(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
         // We know this exists because we checked it before we got here
         let mut cs = self.connections.get_mut(&cs_handle).unwrap();
         if let Some(mut pw) = cs.pending_writes.pop_front() {
@@ -436,7 +462,7 @@ impl TaskContext {
                         context: pw.context,
                         result: Ok(()),
                     };
-                    cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                    cs.reply_to.send(cfm.wrap()).unwrap();
                 }
                 Err(err) => {
                     warn!("Send error: {}", err);
@@ -445,14 +471,14 @@ impl TaskContext {
                         context: pw.context,
                         result: Err(SocketError::IOError(err)),
                     };
-                    cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                    cs.reply_to.send(cfm.wrap()).unwrap();
                 }
             }
         }
     }
 
     /// Data is available on a connected socket. Pass it up
-    fn read(&mut self, event_loop: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+    fn read(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
         debug!("Reading connection {}", cs_handle);
         // We know this exists because we checked it before we got here
         let mut cs = self.connections.get_mut(&cs_handle).unwrap();
@@ -470,7 +496,7 @@ impl TaskContext {
                         data: buffer,
                     };
                     cs.outstanding = true;
-                    cs.reply_to.send(ind.wrap()).expect("Failed to send");
+                    cs.reply_to.send(ind.wrap()).unwrap();
                 }
                 Err(err) => debug!("Failed to read: {}", err),
             }
@@ -478,12 +504,12 @@ impl TaskContext {
     }
 
     /// Connection has gone away. Clean up.
-    fn dropped(&mut self, event_loop: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+    fn dropped(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
         // We know this exists because we checked it before we got here
         {
             let cs = self.connections.get(&cs_handle).unwrap();
             let msg = IndDropped { handle: cs_handle };
-            cs.reply_to.send(msg.wrap()).expect("Unable to send message");
+            cs.reply_to.send(msg.wrap()).unwrap();
         }
         self.connections.remove(&cs_handle);
     }
@@ -507,7 +533,6 @@ impl TaskContext {
                    event_loop: &mut TaskEventLoop,
                    msg: &ReqBind,
                    reply_to: &super::MessageSender) {
-        debug!("In handle_bind");
         let cfm = match mio::tcp::TcpListener::bind(&msg.addr) {
             Ok(server) => {
                 let h = self.next_listen;
@@ -531,36 +556,36 @@ impl TaskContext {
             }
             Err(io_error) => CfmBind { result: Err(SocketError::IOError(io_error)) },
         };
-        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+        reply_to.send(cfm.wrap()).unwrap();
     }
 
     /// Handle a ReqUnbind.
     fn handle_unbind(&mut self,
-                     event_loop: &mut TaskEventLoop,
+                     _: &mut TaskEventLoop,
                      msg: &ReqUnbind,
                      reply_to: &super::MessageSender) {
         let cfm = CfmClose {
-            result: Err(SocketError::Unknown),
+            result: Err(SocketError::NotImplemented),
             handle: msg.handle,
         };
-        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+        reply_to.send(cfm.wrap()).unwrap();
     }
 
     /// Handle a ReqClose
     fn handle_close(&mut self,
-                    event_loop: &mut TaskEventLoop,
+                    _: &mut TaskEventLoop,
                     msg: &ReqClose,
                     reply_to: &super::MessageSender) {
         let cfm = CfmClose {
-            result: Err(SocketError::Unknown),
+            result: Err(SocketError::NotImplemented),
             handle: msg.handle,
         };
-        reply_to.send(cfm.wrap()).expect("Couldn't send message");
+        reply_to.send(cfm.wrap()).unwrap();
     }
 
     /// Handle a ReqSend
     fn handle_send(&mut self,
-                   event_loop: &mut TaskEventLoop,
+                   _: &mut TaskEventLoop,
                    msg: &ReqSend,
                    reply_to: &super::MessageSender) {
         if let Some(cs) = self.connections.get_mut(&msg.handle) {
@@ -592,7 +617,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Ok(()),
                         };
-                        cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                        cs.reply_to.send(cfm.wrap()).unwrap();
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -601,7 +626,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Err(SocketError::IOError(err)),
                         };
-                        cs.reply_to.send(cfm.wrap()).expect("Unable to send");
+                        cs.reply_to.send(cfm.wrap()).unwrap();
                     }
                 }
             }
@@ -611,13 +636,12 @@ impl TaskContext {
                 context: msg.context,
                 handle: msg.handle,
             };
-            reply_to.send(cfm.wrap()).expect("Couldn't send message");
+            reply_to.send(cfm.wrap()).unwrap();
         }
     }
 
     /// Handle responses
     pub fn handle_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
-        debug!("request: {:?}", msg);
         match *msg {
             SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
         }
@@ -650,7 +674,7 @@ impl Drop for ConnectedSocket {
                 context: pw.context,
                 result: Err(SocketError::Dropped),
             };
-            self.reply_to.send(cfm.wrap()).expect("Unable to send");
+            self.reply_to.send(cfm.wrap()).unwrap();
         }
     }
 }
@@ -740,6 +764,26 @@ impl super::NonRequestSendable for IndReceived {
 impl super::NonRequestSendable for RspReceived {
     fn wrap(self) -> super::Message {
         super::Message::Response(super::Response::Socket(SocketRsp::Received(Box::new(self))))
+    }
+}
+
+/// Don't log the contents of the vector
+impl fmt::Debug for IndReceived {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "IndReceived {{ handle: {}, data.len: {} }}",
+               self.handle,
+               self.data.len())
+    }
+}
+
+/// Don't log the contents of the vector
+impl fmt::Debug for ReqSend {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f,
+               "ReqSend {{ handle: {}, data.len: {} }}",
+               self.handle,
+               self.data.len())
     }
 }
 
