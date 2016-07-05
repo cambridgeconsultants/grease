@@ -214,6 +214,12 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
     return (tx, rx);
 }
 
+impl Drop for Message {
+    fn drop(&mut self) {
+        debug!("** Destroyed {:?}", self);
+    }
+}
+
 // ****************************************************************************
 //
 // Private Functions

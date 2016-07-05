@@ -15,6 +15,7 @@
 // ****************************************************************************
 
 use std::collections::{HashMap, VecDeque};
+use std::convert::From;
 use std::fmt;
 use std::io::prelude::*;
 use std::io;
@@ -141,8 +142,8 @@ pub struct CfmClose {
 pub struct CfmSend {
     /// The handle requested for sending
     pub handle: ConnectedHandle,
-    /// Success or otherwise
-    pub result: Result<(), SocketError>,
+    /// Amount sent or error
+    pub result: Result<usize, SocketError>,
     /// Some (maybe) unique identifier
     pub context: WriteContext,
 }
@@ -231,6 +232,7 @@ struct ListenSocket {
 /// Create for every pending write
 struct PendingWrite {
     context: WriteContext,
+    sent: usize,
     data: Vec<u8>,
 }
 
@@ -272,7 +274,7 @@ struct TaskContext {
 //
 // ****************************************************************************
 
-const MAX_READ_LEN: usize = 1;
+const MAX_READ_LEN: usize = 1024;
 
 // ****************************************************************************
 //
@@ -321,6 +323,7 @@ impl mio::Handler for TaskContext {
     /// We have to check the EventSet to find out whether our socket is
     /// readable or writable
     fn ready(&mut self, event_loop: &mut TaskEventLoop, token: mio::Token, events: mio::EventSet) {
+        debug!("Ready!");
         let handle = token.0;
         if events.is_readable() {
             if self.listeners.contains_key(&handle) {
@@ -360,27 +363,30 @@ impl mio::Handler for TaskContext {
                 warn!("HUP on unknown token {}", handle);
             }
         }
+        debug!("Ready is done");
     }
 
     /// Called when mio (i.e. our task) has received a message
     fn notify(&mut self, event_loop: &mut TaskEventLoop, msg: super::Message) {
+        debug!("Notify!");
         match msg {
             // We only handle our own requests and responses
-            super::Message::Request(reply_to, super::Request::Socket(x)) => {
-                self.handle_req(event_loop, &x, &reply_to)
+            super::Message::Request(ref reply_to, super::Request::Socket(ref x)) => {
+                self.handle_req(event_loop, x, reply_to)
             }
-            super::Message::Response(super::Response::Socket(x)) => self.handle_rsp(event_loop, &x),
+            super::Message::Response(super::Response::Socket(ref x)) => {
+                self.handle_rsp(event_loop, x)
+            }
             // We don't have any responses
             // We don't expect any Indications or Confirmations from other providers
             // If we get here, someone else has made a mistake
             _ => error!("Unexpected message in socket task: {:?}", msg),
         }
+        debug!("Notify is done");
     }
 
     /// Should never be called - we don't have a timeout on our poll
-    fn timeout(&mut self, _: &mut TaskEventLoop, _: Self::Timeout) {
-        unimplemented!();
-    }
+    fn timeout(&mut self, _: &mut TaskEventLoop, _: Self::Timeout) {}
 
     /// Not sure when this is called
     fn interrupted(&mut self, _: &mut TaskEventLoop) {}
@@ -432,7 +438,7 @@ impl TaskContext {
                     self.connections.insert(cs.handle, cs);
                     ls.reply_to.send(msg.wrap()).unwrap();
                 }
-                Err(err) => debug!("Fumbled incoming connection: {}", err),
+                Err(err) => warn!("Fumbled incoming connection: {}", err),
             }
         } else {
             warn!("accept returned None!");
@@ -445,15 +451,12 @@ impl TaskContext {
         let mut cs = self.connections.get_mut(&cs_handle).unwrap();
         loop {
             if let Some(mut pw) = cs.pending_writes.pop_front() {
-                let to_send = pw.data.len();
-                match cs.connection.write(&pw.data) {
+                let to_send = pw.data.len() - pw.sent;
+                match cs.connection.write(&pw.data[pw.sent..]) {
                     Ok(len) if len < to_send => {
                         let left = to_send - len;
-                        warn!("Sent {} of {}, leaving {}", len, to_send, left);
-                        let pw = PendingWrite {
-                            context: pw.context,
-                            data: pw.data.split_off(len),
-                        };
+                        debug!("Sent {} of {}, leaving {}", len, to_send, left);
+                        pw.sent = pw.sent + len;
                         cs.pending_writes.push_front(pw);
                         // No indication here - we wait some more
                         break;
@@ -463,7 +466,7 @@ impl TaskContext {
                         let cfm = CfmSend {
                             handle: cs.handle,
                             context: pw.context,
-                            result: Ok(()),
+                            result: Ok(to_send),
                         };
                         cs.reply_to.send(cfm.wrap()).unwrap();
                     }
@@ -472,7 +475,7 @@ impl TaskContext {
                         let cfm = CfmSend {
                             handle: cs.handle,
                             context: pw.context,
-                            result: Err(SocketError::IOError(err)),
+                            result: Err(err.into()),
                         };
                         cs.reply_to.send(cfm.wrap()).unwrap();
                         break;
@@ -505,7 +508,7 @@ impl TaskContext {
                     cs.outstanding = true;
                     cs.reply_to.send(ind.wrap()).unwrap();
                 }
-                Err(err) => debug!("Failed to read: {}", err),
+                Err(_) => {}
             }
         }
     }
@@ -528,10 +531,10 @@ impl TaskContext {
                       reply_to: &super::MessageSender) {
         debug!("request: {:?}", msg);
         match *msg {
-            SocketReq::Bind(ref x) => self.handle_bind(event_loop, &x, reply_to),
-            SocketReq::Unbind(ref x) => self.handle_unbind(event_loop, &x, reply_to),
-            SocketReq::Close(ref x) => self.handle_close(event_loop, &x, reply_to),
-            SocketReq::Send(ref x) => self.handle_send(event_loop, &x, reply_to),
+            SocketReq::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
+            SocketReq::Unbind(ref x) => self.handle_unbind(event_loop, x, reply_to),
+            SocketReq::Close(ref x) => self.handle_close(event_loop, x, reply_to),
+            SocketReq::Send(ref x) => self.handle_send(event_loop, x, reply_to),
         }
     }
 
@@ -540,6 +543,7 @@ impl TaskContext {
                    event_loop: &mut TaskEventLoop,
                    msg: &ReqBind,
                    reply_to: &super::MessageSender) {
+        info!("Binding {}...", msg.addr);
         let cfm = match mio::tcp::TcpListener::bind(&msg.addr) {
             Ok(server) => {
                 let h = self.next_listen;
@@ -558,10 +562,10 @@ impl TaskContext {
                         self.listeners.insert(h, l);
                         CfmBind { result: Ok(h) }
                     }
-                    Err(io_error) => CfmBind { result: Err(SocketError::IOError(io_error)) },
+                    Err(io_error) => CfmBind { result: Err(io_error.into()) },
                 }
             }
-            Err(io_error) => CfmBind { result: Err(SocketError::IOError(io_error)) },
+            Err(io_error) => CfmBind { result: Err(io_error.into()) },
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -599,8 +603,9 @@ impl TaskContext {
             let to_send = msg.data.len();
             // Let's see how much we can get rid off right now
             if cs.pending_writes.len() > 0 {
-                warn!("Storing write");
+                debug!("Storing write len {}", to_send);
                 let pw = PendingWrite {
+                    sent: 0,
                     context: msg.context,
                     data: msg.data.clone(),
                 };
@@ -610,10 +615,11 @@ impl TaskContext {
                 match cs.connection.write(&msg.data) {
                     Ok(len) if len < to_send => {
                         let left = to_send - len;
-                        warn!("Sent {} of {}, leaving {}", len, to_send, left);
+                        debug!("Sent {} of {}, leaving {}", len, to_send, left);
                         let pw = PendingWrite {
+                            sent: len,
                             context: msg.context,
-                            data: msg.data.clone().split_off(len),
+                            data: msg.data.clone(),
                         };
                         cs.pending_writes.push_back(pw);
                         // No cfm here - we wait
@@ -623,7 +629,7 @@ impl TaskContext {
                         let cfm = CfmSend {
                             context: msg.context,
                             handle: msg.handle,
-                            result: Ok(()),
+                            result: Ok(to_send),
                         };
                         cs.reply_to.send(cfm.wrap()).unwrap();
                     }
@@ -632,7 +638,7 @@ impl TaskContext {
                         let cfm = CfmSend {
                             context: msg.context,
                             handle: msg.handle,
-                            result: Err(SocketError::IOError(err)),
+                            result: Err(err.into()),
                         };
                         cs.reply_to.send(cfm.wrap()).unwrap();
                     }
@@ -792,6 +798,13 @@ impl fmt::Debug for ReqSend {
                "ReqSend {{ handle: {}, data.len: {} }}",
                self.handle,
                self.data.len())
+    }
+}
+
+/// Wrap io::Errors into SocketErrors easily
+impl From<io::Error> for SocketError {
+    fn from(e: io::Error) -> SocketError {
+        SocketError::IOError(e)
     }
 }
 
