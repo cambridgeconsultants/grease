@@ -64,7 +64,7 @@ fn main() {
     info!("Hello, this is cuslip (pronounced copper-slip).");
     info!("It's what you put on threads when you have rust issues...");
 
-    let socket_thread = socket::new();
+    let socket_thread = socket::make_task();
     let (tx, rx) = cuslip::make_channel();
 
     {

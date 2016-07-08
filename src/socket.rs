@@ -284,7 +284,7 @@ const MAX_READ_LEN: usize = 1024;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn new() -> super::MessageSender {
+pub fn make_task() -> super::MessageSender {
     super::make_task("socket", main_loop)
 }
 
@@ -372,10 +372,13 @@ impl mio::Handler for TaskContext {
         match msg {
             // We only handle our own requests and responses
             super::Message::Request(ref reply_to, super::Request::Socket(ref x)) => {
-                self.handle_req(event_loop, x, reply_to)
+                self.handle_socket_req(event_loop, x, reply_to)
+            }
+            super::Message::Request(ref reply_to, super::Request::Generic(ref x)) => {
+                self.handle_generic_req(x, reply_to)
             }
             super::Message::Response(super::Response::Socket(ref x)) => {
-                self.handle_rsp(event_loop, x)
+                self.handle_socket_rsp(event_loop, x)
             }
             // We don't have any responses
             // We don't expect any Indications or Confirmations from other providers
@@ -524,8 +527,20 @@ impl TaskContext {
         self.connections.remove(&cs_handle);
     }
 
+    /// Handle generic requests
+    pub fn handle_generic_req(&mut self,
+                      msg: &super::GenericReq,
+                      reply_to: &super::MessageSender) {
+        match *msg {
+            super::GenericReq::Ping(ref x) => {
+                let cfm = super::PingCfm { context: x.context };
+                reply_to.send(cfm.wrap()).unwrap();
+            }
+        }
+    }
+
     /// Handle requests
-    pub fn handle_req(&mut self,
+    pub fn handle_socket_req(&mut self,
                       event_loop: &mut TaskEventLoop,
                       msg: &SocketReq,
                       reply_to: &super::MessageSender) {
@@ -655,7 +670,7 @@ impl TaskContext {
     }
 
     /// Handle responses
-    pub fn handle_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
+    pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
         match *msg {
             SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
         }
@@ -693,8 +708,32 @@ impl Drop for ConnectedSocket {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::super::RequestSendable;
+    use super::*;
+    use std::thread;
+    use std::time;
+
+    #[test]
+    fn make_task_and_ping() {
+        let socket_thread = make_task();
+        let (reply_to, test_rx) = super::super::make_channel();
+        let ping_req = super::super::PingReq { context: 1234 };
+        thread::sleep(time::Duration::new(5, 0));
+        socket_thread.send(ping_req.wrap(&reply_to)).unwrap();
+        let cfm = test_rx.recv().unwrap();
+        match cfm {
+            super::super::Message::Confirmation(super::super::Confirmation::Generic(super::super::GenericCfm::Ping(ref x))) => {
+                assert_eq!(x.context, 1234);
+            }
+            _ => panic!("Bad match"),
+        }
+    }
+}
+
 /// ReqBind is sendable over a channel
-impl super::RequestSendable for ReqBind {
+impl RequestSendable for ReqBind {
     fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
         super::Message::Request(reply_to.clone(),
                                 super::Request::Socket(SocketReq::Bind(Box::new(self))))
@@ -702,7 +741,7 @@ impl super::RequestSendable for ReqBind {
 }
 
 /// ReqUnbind is sendable over a channel
-impl super::RequestSendable for ReqUnbind {
+impl RequestSendable for ReqUnbind {
     fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
         super::Message::Request(reply_to.clone(),
                                 super::Request::Socket(SocketReq::Unbind(Box::new(self))))
@@ -710,7 +749,7 @@ impl super::RequestSendable for ReqUnbind {
 }
 
 /// ReqClose is sendable over a channel
-impl super::RequestSendable for ReqClose {
+impl RequestSendable for ReqClose {
     fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
         super::Message::Request(reply_to.clone(),
                                 super::Request::Socket(SocketReq::Close(Box::new(self))))
@@ -718,7 +757,7 @@ impl super::RequestSendable for ReqClose {
 }
 
 /// ReqSend is sendable over a channel
-impl super::RequestSendable for ReqSend {
+impl RequestSendable for ReqSend {
     fn wrap(self, reply_to: &super::MessageSender) -> super::Message {
         super::Message::Request(reply_to.clone(),
                                 super::Request::Socket(SocketReq::Send(Box::new(self))))
@@ -726,56 +765,56 @@ impl super::RequestSendable for ReqSend {
 }
 
 /// CfmBind is sendable over a channel
-impl super::NonRequestSendable for CfmBind {
+impl NonRequestSendable for CfmBind {
     fn wrap(self) -> super::Message {
         super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Bind(Box::new(self))))
     }
 }
 
 /// CfmUnbind is sendable over a channel
-impl super::NonRequestSendable for CfmUnbind {
+impl NonRequestSendable for CfmUnbind {
     fn wrap(self) -> super::Message {
         super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Unbind(Box::new(self))))
     }
 }
 
 /// CfmClose is sendable over a channel
-impl super::NonRequestSendable for CfmClose {
+impl NonRequestSendable for CfmClose {
     fn wrap(self) -> super::Message {
         super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Close(Box::new(self))))
     }
 }
 
 /// CfmSend is sendable over a channel
-impl super::NonRequestSendable for CfmSend {
+impl NonRequestSendable for CfmSend {
     fn wrap(self) -> super::Message {
         super::Message::Confirmation(super::Confirmation::Socket(SocketCfm::Send(Box::new(self))))
     }
 }
 
 /// IndConnected is sendable over a channel
-impl super::NonRequestSendable for IndConnected {
+impl NonRequestSendable for IndConnected {
     fn wrap(self) -> super::Message {
         super::Message::Indication(super::Indication::Socket(SocketInd::Connected(Box::new(self))))
     }
 }
 
 /// IndDropped is sendable over a channel
-impl super::NonRequestSendable for IndDropped {
+impl NonRequestSendable for IndDropped {
     fn wrap(self) -> super::Message {
         super::Message::Indication(super::Indication::Socket(SocketInd::Dropped(Box::new(self))))
     }
 }
 
 /// IndReceived is sendable over a channel
-impl super::NonRequestSendable for IndReceived {
+impl NonRequestSendable for IndReceived {
     fn wrap(self) -> super::Message {
         super::Message::Indication(super::Indication::Socket(SocketInd::Received(Box::new(self))))
     }
 }
 
 /// RspReceived is sendable over a channel
-impl super::NonRequestSendable for RspReceived {
+impl NonRequestSendable for RspReceived {
     fn wrap(self) -> super::Message {
         super::Message::Response(super::Response::Socket(SocketRsp::Received(Box::new(self))))
     }

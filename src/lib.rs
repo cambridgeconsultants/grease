@@ -20,70 +20,7 @@
 //!
 //! The wrapping is handled semi-automatically. I might macro this in future.
 //!
-//! Here's an example of what might be a in Foo module:
-//!
-//! ```
-//! #[derive(Debug)]
-//! pub enum FooReq {
-//!     /// Open a foo
-//!     Open(Box<FooReqOpen>),
-//!     /// Close an open foo
-//!     Close(Box<FooReqClose>),
-//! }
-//!
-//! #[derive(Debug)]
-//! pub struct FooReqOpen {
-//!     pub bar: String,
-//!     pub baz: u32,
-//! }
-//!
-//! impl RequestSendable for FooReqOpen {
-//!     fn wrap(self, reply_to: &MessageSender) -> Message {
-//!         Message::Request(reply_to.clone(), Request::Foo(FooReq::Open(Box::new(self))))
-//!     }
-//! }
-//! ```
-//!
-//! Here's what you add to cuslip to register your task.
-//!
-//! ```
-//! use foo;
-//! pub enum Request {
-//!     Foo(foo::FooReq),
-//! }
-//! ```
-//!
-//! Finally, here's an (incomplete) module that uses Foo:
-//!
-//! ```
-//! struct FooUser {
-//!     foo_handle: MessageSender,
-//!     tx: MessageSender,
-//!     rx: MessageReceiver,
-//! }
-//!
-//! impl FooUser {
-//!     fn main_loop(&mut self) {
-//!         loop {
-//!             let msg = self.rx.recv().unwrap();
-//!             match msg {
-//!                 /// Do something in `handle_req`, and send the confirmation to `reply_to`
-//!                 Message::Request(reply_to, Request::Foo(x)) => self.handle_req(reply_to, x)
-//!             }
-//!         }
-//!     }
-//!
-//!     fn test_fn(&self) {
-//!         // assume we have a handle to a foo task we can
-//!         // send Foo requests on, and we have
-//!         let msg = FooReqOpen {
-//!             bar: "test".to_owned(),
-//!             baz: 1234
-//!         };
-//!         self.foo_handle.send(msg.wrap(self.tx.clone()).unwrap()
-//!     }
-//! }
-//! ```
+//! See the `socket` module for an example,
 
 #![allow(dead_code)]
 
@@ -129,6 +66,7 @@ pub enum Message {
 /// This is an enumeration of all the interfaces.
 #[derive(Debug)]
 pub enum Request {
+    Generic(GenericReq),
     Socket(socket::SocketReq),
 }
 
@@ -136,6 +74,7 @@ pub enum Request {
 /// This is an enumeration of all the interfaces.
 #[derive(Debug)]
 pub enum Confirmation {
+    Generic(GenericCfm),
     Socket(socket::SocketCfm),
 }
 
@@ -167,6 +106,30 @@ pub trait RequestSendable {
     fn wrap(self, reply_to: &MessageSender) -> Message;
 }
 
+/// Generic requests should be handled by every task
+#[derive(Debug)]
+pub enum GenericReq {
+    Ping(Box<PingReq>),
+}
+
+/// There is exactly one GenericCfm for every GenericReq
+#[derive(Debug)]
+pub enum GenericCfm {
+    Ping(Box<PingCfm>),
+}
+
+/// A simple ping - generates a PingCfm
+#[derive(Debug)]
+pub struct PingReq {
+    context: usize,
+}
+
+/// Reply to a PingReq
+#[derive(Debug)]
+pub struct PingCfm {
+    context: usize,
+}
+
 // ****************************************************************************
 //
 // Private Types
@@ -192,11 +155,14 @@ pub trait RequestSendable {
 /// Helper function to create a new thread.
 ///
 /// ```
-/// fn main_loop(rx: super::MessageReceiver) {
-///     ...
+/// fn main_loop(rx: cuslip::MessageReceiver) {
+///     loop {
+///         let _ = rx.recv().unwrap();
+///     }
 /// }
-/// ...
-/// super::make_task("foo", main_loop);
+/// # fn main() {
+/// cuslip::make_task("foo", main_loop);
+/// # }
 /// ```
 pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
     where F: FnOnce(MessageReceiver),
@@ -226,7 +192,41 @@ impl Drop for Message {
 //
 // ****************************************************************************
 
-// None
+/// PingReq is sendable over a channel
+impl RequestSendable for PingReq {
+    fn wrap(self, reply_to: &MessageSender) -> Message {
+        Message::Request(reply_to.clone(),
+                         Request::Generic(GenericReq::Ping(Box::new(self))))
+    }
+}
+
+/// PingCfm is sendable over a channel
+impl NonRequestSendable for PingCfm {
+    fn wrap(self) -> Message {
+        Message::Confirmation(Confirmation::Generic(GenericCfm::Ping(Box::new(self))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_channel() {
+        let (tx, rx) = super::make_channel();
+        let test_req = super::PingReq { context: 1234 };
+        tx.send(test_req.wrap(&tx)).unwrap();
+        let msg = rx.recv();
+        println!("Got {:?}", msg);
+        let msg = msg.unwrap();
+        match msg {
+            Message::Request(_, Request::Generic(GenericReq::Ping(ref x))) => {
+                assert_eq!(x.context, 1234);
+            }
+            _ => panic!("Bad match"),
+        }
+    }
+}
 
 // ****************************************************************************
 //
