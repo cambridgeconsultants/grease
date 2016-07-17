@@ -193,7 +193,7 @@ struct TaskContext {
 /// to send this task messages.
 pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
     let local_socket = socket.clone();
-    ::make_task("socket",
+    ::make_task("http",
                 move |rx: ::MessageReceiver| main_loop(rx, local_socket))
 }
 
