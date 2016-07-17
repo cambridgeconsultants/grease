@@ -15,7 +15,8 @@ extern crate time;
 use std::env;
 use std::thread;
 
-use cuslip::{RequestSendable, NonRequestSendable, socket};
+use cuslip::prelude::*;
+use cuslip::socket;
 use env_logger::LogBuilder;
 use log::{LogRecord, LogLevelFilter};
 

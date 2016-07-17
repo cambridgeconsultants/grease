@@ -21,6 +21,15 @@
 //! The wrapping is handled semi-automatically. I might macro this in future.
 //!
 //! See the `socket` module for an example,
+//!
+//! ## Usage
+//!
+//! To use cuslip, make sure your program/crate has:
+//!
+//! ```
+//! use cuslip::prelude::*;
+//! use cuslip;
+//! ```
 
 #![allow(dead_code)]
 
@@ -34,10 +43,12 @@
 extern crate log;
 extern crate mio;
 
+pub mod socket;
+pub mod prelude;
+
+use ::prelude::*;
 use std::sync::mpsc;
 use std::thread;
-
-pub mod socket;
 
 // ****************************************************************************
 //
@@ -53,7 +64,7 @@ pub type MessageReceiver = mpsc::Receiver<Message>;
 
 /// A message is the fundametal unit we pass between tasks.
 /// All messages have a body, but requests also have an mpsc Channel
-/// object that the match confirmation should be sent to.
+/// object that the matching confirmation should be sent to.
 #[derive(Debug)]
 pub enum Message {
     Request(MessageSender, Request),
@@ -62,69 +73,60 @@ pub enum Message {
     Response(Response),
 }
 
-/// The set of all requests in the system.
-/// This is an enumeration of all the interfaces.
+/// The set of all requests in the system. This is an enumeration of all the
+/// services that can handle requests. The enum included within each service is probably
+/// defined in that service's module.
 #[derive(Debug)]
 pub enum Request {
     Generic(GenericReq),
     Socket(socket::SocketReq),
 }
 
-/// The set of all confirmations in the system.
-/// This is an enumeration of all the interfaces.
+/// The set of all confirmations in the system. This should look exactly like
+/// `Request` but with Cfm instead of Req. These are handled by tasks that
+/// send requests - you send a request and you get a confirm back.
 #[derive(Debug)]
 pub enum Confirmation {
     Generic(GenericCfm),
     Socket(socket::SocketCfm),
 }
 
-/// The set of all indications in the system.
-/// This is an enumeration of all the interfaces.
+/// The set of all indications in the system. This is an enumeration of all the
+/// services that can send indications. The enum included within each
+/// service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Indication {
     Socket(socket::SocketInd),
 }
 
-/// The set of all responses in the system.
-/// This is an enumeration of all the interfaces.
+/// The set of all responses in the system. This is an enumeration of all the
+/// services that need responses (which is actually quite rare). The enum
+/// included within each service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Response {
     Socket(socket::SocketRsp),
 }
 
-/// Implementors of the NonRequestSendable trait can be easily wrapped in a message
-/// ready for sending down a MessageSender channel endpoint. All Indication, Confirmation
-/// and Response messages must implement this.
-pub trait NonRequestSendable {
-    fn wrap(self) -> Message;
-}
-
-/// Implementors of the RequestSendable trait can be easily wrapped in a
-/// message ready for sending down a MessageSender channel endpoint. All
-/// Request messages must implement this.
-pub trait RequestSendable {
-    fn wrap(self, reply_to: &MessageSender) -> Message;
-}
-
-/// Generic requests should be handled by every task
+/// Generic requests should be handled by every task.
 #[derive(Debug)]
 pub enum GenericReq {
     Ping(Box<PingReq>),
 }
 
-/// There is exactly one GenericCfm for every GenericReq
+/// There is exactly one GenericCfm for every GenericReq. These should be
+/// handled by every task that can ever send a GenericReq.
 #[derive(Debug)]
 pub enum GenericCfm {
     Ping(Box<PingCfm>),
 }
 
-/// A simple ping - generates a PingCfm
+/// A simple ping - generates a PingCfm with some reflected context.
 #[derive(Debug)]
 pub struct PingReq {
     context: usize,
 }
 
-/// Reply to a PingReq
+/// Reply to a PingReq, including the reflected context.
 #[derive(Debug)]
 pub struct PingCfm {
     context: usize,
@@ -209,18 +211,18 @@ impl NonRequestSendable for PingCfm {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use ::prelude::*;
 
     #[test]
     fn test_make_channel() {
-        let (tx, rx) = super::make_channel();
-        let test_req = super::PingReq { context: 1234 };
+        let (tx, rx) = ::make_channel();
+        let test_req = ::PingReq { context: 1234 };
         tx.send(test_req.wrap(&tx)).unwrap();
         let msg = rx.recv();
         println!("Got {:?}", msg);
         let msg = msg.unwrap();
         match msg {
-            Message::Request(_, Request::Generic(GenericReq::Ping(ref x))) => {
+            ::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {
                 assert_eq!(x.context, 1234);
             }
             _ => panic!("Bad match"),
