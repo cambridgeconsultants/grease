@@ -42,9 +42,11 @@
 #[macro_use]
 extern crate log;
 extern crate mio;
+extern crate rushttp;
 
 pub mod socket;
 pub mod prelude;
+pub mod http;
 
 use ::prelude::*;
 use std::sync::mpsc;
@@ -61,6 +63,11 @@ pub type MessageSender = mpsc::Sender<Message>;
 
 /// A task uses this internally for pending on received messages
 pub type MessageReceiver = mpsc::Receiver<Message>;
+
+/// A type used to passing context between layers. If each layer maintains
+/// a HashMap<Context, T>, when a confirmation comes back from the layer
+/// below, it's easy to work out which T it corresponds to.
+pub type Context = usize;
 
 /// A message is the fundametal unit we pass between tasks.
 /// All messages have a body, but requests also have an mpsc Channel
@@ -80,6 +87,7 @@ pub enum Message {
 pub enum Request {
     Generic(GenericReq),
     Socket(socket::SocketReq),
+    Http(http::HttpReq),
 }
 
 /// The set of all confirmations in the system. This should look exactly like
@@ -89,6 +97,7 @@ pub enum Request {
 pub enum Confirmation {
     Generic(GenericCfm),
     Socket(socket::SocketCfm),
+    Http(http::HttpCfm),
 }
 
 /// The set of all indications in the system. This is an enumeration of all the
@@ -97,6 +106,7 @@ pub enum Confirmation {
 #[derive(Debug)]
 pub enum Indication {
     Socket(socket::SocketInd),
+    Http(http::HttpInd),
 }
 
 /// The set of all responses in the system. This is an enumeration of all the
@@ -123,13 +133,13 @@ pub enum GenericCfm {
 /// A simple ping - generates a PingCfm with some reflected context.
 #[derive(Debug)]
 pub struct PingReq {
-    context: usize,
+    context: Context,
 }
 
 /// Reply to a PingReq, including the reflected context.
 #[derive(Debug)]
 pub struct PingCfm {
-    context: usize,
+    context: Context,
 }
 
 // ****************************************************************************

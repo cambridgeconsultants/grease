@@ -16,7 +16,7 @@ use std::env;
 use std::thread;
 
 use cuslip::prelude::*;
-use cuslip::socket;
+use cuslip::{http, socket};
 use env_logger::LogBuilder;
 use log::{LogRecord, LogLevelFilter};
 
@@ -66,18 +66,22 @@ fn main() {
     info!("It's what you put on threads when you have rust issues...");
 
     let socket_thread = socket::make_task();
+    let http_thread = http::make_task(&socket_thread);
     let (tx, rx) = cuslip::make_channel();
 
     {
-        let bind_req = socket::ReqBind { addr: "0.0.0.0:8000".parse().unwrap() };
-        socket_thread.send(bind_req.wrap(&tx)).unwrap();
-        debug!("Got cfm for 8000 bind: {:?}", rx.recv().unwrap());
+        let bind_req = http::ReqBind {
+            context: 1,
+            addr: "0.0.0.0:8000".parse().unwrap(),
+        };
+        http_thread.send(bind_req.wrap(&tx)).unwrap();
+        debug!("Got cfm for 8000 HTTP bind: {:?}", rx.recv().unwrap());
     }
 
     {
         let bind_req = socket::ReqBind { addr: "0.0.0.0:8001".parse().unwrap() };
         socket_thread.send(bind_req.wrap(&tx)).unwrap();
-        debug!("Got cfm for 8001 bind: {:?}", rx.recv().unwrap());
+        debug!("Got cfm for 8001 raw socket bind: {:?}", rx.recv().unwrap());
     }
 
     let mut n: cuslip::socket::WriteContext = 0;

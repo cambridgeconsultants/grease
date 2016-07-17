@@ -143,7 +143,7 @@ pub struct CfmSend {
     /// The handle requested for sending
     pub handle: ConnectedHandle,
     /// Amount sent or error
-    pub result: Result<usize, SocketError>,
+    pub result: Result<::Context, SocketError>,
     /// Some (maybe) unique identifier
     pub context: WriteContext,
 }
@@ -192,13 +192,13 @@ pub struct RspReceived {
 // ****************************************************************************
 
 /// Uniquely identifies an listening socket
-pub type ListenHandle = usize;
+pub type ListenHandle = ::Context;
 
 /// Uniquely identifies an open socket
-pub type ConnectedHandle = usize;
+pub type ConnectedHandle = ::Context;
 
 /// Allows a user to track multiple writes
-pub type WriteContext = usize;
+pub type WriteContext = ::Context;
 
 /// All possible errors the Socket task might want to
 /// report.
@@ -380,10 +380,7 @@ impl mio::Handler for TaskContext {
             ::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
                 self.handle_generic_req(x, reply_to)
             }
-            ::Message::Response(::Response::Socket(ref x)) => {
-                self.handle_socket_rsp(event_loop, x)
-            }
-            // We don't have any responses
+            ::Message::Response(::Response::Socket(ref x)) => self.handle_socket_rsp(event_loop, x),
             // We don't expect any Indications or Confirmations from other providers
             // If we get here, someone else has made a mistake
             _ => error!("Unexpected message in socket task: {:?}", msg),
@@ -531,9 +528,7 @@ impl TaskContext {
     }
 
     /// Handle generic requests
-    pub fn handle_generic_req(&mut self,
-                      msg: &::GenericReq,
-                      reply_to: &::MessageSender) {
+    pub fn handle_generic_req(&mut self, msg: &::GenericReq, reply_to: &::MessageSender) {
         match *msg {
             ::GenericReq::Ping(ref x) => {
                 let cfm = ::PingCfm { context: x.context };
@@ -544,9 +539,9 @@ impl TaskContext {
 
     /// Handle requests
     pub fn handle_socket_req(&mut self,
-                      event_loop: &mut TaskEventLoop,
-                      msg: &SocketReq,
-                      reply_to: &::MessageSender) {
+                             event_loop: &mut TaskEventLoop,
+                             msg: &SocketReq,
+                             reply_to: &::MessageSender) {
         debug!("request: {:?}", msg);
         match *msg {
             SocketReq::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
@@ -601,10 +596,7 @@ impl TaskContext {
     }
 
     /// Handle a ReqClose
-    fn handle_close(&mut self,
-                    _: &mut TaskEventLoop,
-                    msg: &ReqClose,
-                    reply_to: &::MessageSender) {
+    fn handle_close(&mut self, _: &mut TaskEventLoop, msg: &ReqClose, reply_to: &::MessageSender) {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
             handle: msg.handle,
@@ -613,10 +605,7 @@ impl TaskContext {
     }
 
     /// Handle a ReqSend
-    fn handle_send(&mut self,
-                   _: &mut TaskEventLoop,
-                   msg: &ReqSend,
-                   reply_to: &::MessageSender) {
+    fn handle_send(&mut self, _: &mut TaskEventLoop, msg: &ReqSend, reply_to: &::MessageSender) {
         if let Some(cs) = self.connections.get_mut(&msg.handle) {
             let to_send = msg.data.len();
             // Let's see how much we can get rid off right now
@@ -738,7 +727,7 @@ mod test {
 impl RequestSendable for ReqBind {
     fn wrap(self, reply_to: &::MessageSender) -> ::Message {
         ::Message::Request(reply_to.clone(),
-                                ::Request::Socket(SocketReq::Bind(Box::new(self))))
+                           ::Request::Socket(SocketReq::Bind(Box::new(self))))
     }
 }
 
@@ -746,7 +735,7 @@ impl RequestSendable for ReqBind {
 impl RequestSendable for ReqUnbind {
     fn wrap(self, reply_to: &::MessageSender) -> ::Message {
         ::Message::Request(reply_to.clone(),
-                                ::Request::Socket(SocketReq::Unbind(Box::new(self))))
+                           ::Request::Socket(SocketReq::Unbind(Box::new(self))))
     }
 }
 
@@ -754,7 +743,7 @@ impl RequestSendable for ReqUnbind {
 impl RequestSendable for ReqClose {
     fn wrap(self, reply_to: &::MessageSender) -> ::Message {
         ::Message::Request(reply_to.clone(),
-                                ::Request::Socket(SocketReq::Close(Box::new(self))))
+                           ::Request::Socket(SocketReq::Close(Box::new(self))))
     }
 }
 
@@ -762,7 +751,7 @@ impl RequestSendable for ReqClose {
 impl RequestSendable for ReqSend {
     fn wrap(self, reply_to: &::MessageSender) -> ::Message {
         ::Message::Request(reply_to.clone(),
-                                ::Request::Socket(SocketReq::Send(Box::new(self))))
+                           ::Request::Socket(SocketReq::Send(Box::new(self))))
     }
 }
 
