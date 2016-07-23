@@ -2,9 +2,16 @@
 //!
 //! This service depends on socket for the socket-y stuff, and
 //! it uses the rushttp library to handle the HTTP parsing. The layer
-//! above is responsible for working out what to do with the requests.
+//! above is responsible for working out what to do with the requests. This
+//! layer will accept anything - OPTION, HEAD, GET, POST, etc - on any URL and
+//! pass it on up. Consider this as a basic octet-to-IndConnected parser, and
+//! a basic ReqResponseX-to-octet renderer. It's not a fully fledged webserver
+//! by itself. The only thing we validate is the Host: header, so we know
+//! which upper layer to pass the IndConnected on to.
 //!
-
+//! TODO: We need to support an IndBody / RspBody at some point, so that
+//! POST and PUT will actually work.
+//!
 //! Once an http server has been bound using `ReqBind`, when an http request
 //! has been seen, an `IndRequest` will be sent up containing the relevant headers.
 //! An `IndClosed` will be sent when the connection subsequently closes. The
@@ -14,6 +21,20 @@
 //! another ReqResponseBody. Although the socket task underneath should buffer
 //! all the data anyway, using flow control properly saves memory - especially
 //! when sending large bodies.
+//!
+//! When an HTTP server is bound, we check our current bindings. If we are
+//! not currently bound on that port, we bind it. Either way, we create a new
+//! HttpServer object.
+//!
+//! When a new connection is received from the socket task, we create a new
+//! HttpConnection object, which contains an HttpRequest parser object. When
+//! data is received on the socket, it's passed to the parser and then we
+//! respond to the indication to unblock the socket and allow more data in.
+//! Once the parser returns something other than `ParseResult::InProgress`
+//! we can check the request against our registered HttpServer objects
+//! and pass up an IndConnected if appropriate (or reject the request with
+//! an error if we don't like it).
+
 
 // ****************************************************************************
 //
@@ -25,6 +46,7 @@ use std::net;
 use std::collections::HashMap;
 
 use rushttp;
+use ::socket::{SocketCfm, SocketInd};
 use ::prelude::*;
 
 // ****************************************************************************
@@ -71,21 +93,40 @@ pub enum HttpInd {
 /// A bind request - start an HTTP server on a given port
 #[derive(Debug)]
 pub struct ReqBind {
+    /// Use None to accept any hostname (default), otherwise
+    /// only accept with Host: header equal to this String.
+    pub server_name: Option<String>,
+    /// Which address to bind. If it's already bound, we re-use
+    /// the existing binding.
     pub addr: net::SocketAddr,
+    /// Reflected back in the cfm
     pub context: ::Context,
 }
 
-/// Send the headers for an HTTP response
+/// Send the headers for an HTTP response. Host, Content-Length
+/// and Content-Type are automatically added from the relevant fields
+/// but you can add arbitrary other headers in the header vector.
 #[derive(Debug)]
 pub struct ReqResponseStart {
+    /// Which HTTP connection to start a response on
     pub handle: ConnectionHandle,
+    /// Reflected back in the cfm
     pub context: ::Context,
+    /// Content-type for the response, e.g. "text/html"
+    pub content_type: String,
+    /// Length for the response - None means unbounded
+    pub length: Option<usize>,
+    /// Any other headers required. Cow allows you to use String or &str.
+    pub headers: HashMap<String, String>
 }
 
-/// Send some body content for an HTTP response
+/// Send some body content for an HTTP response. Must be proceeded
+/// by ReqResponseStart to send the headers.
 #[derive(Debug)]
 pub struct ReqResponseBody {
+    /// Which HTTP connection to send some response body on
     pub handle: ConnectionHandle,
+    /// Reflected back in the cfm
     pub context: ::Context,
 }
 
@@ -233,11 +274,25 @@ impl TaskContext {
             ::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
                 self.handle_generic_req(x, reply_to)
             }
+            ::Message::Confirmation(::Confirmation::Socket(ref x)) => {
+                self.handle_socket_cfm(x)
+            }
+            ::Message::Indication(::Indication::Socket(ref x)) => {
+                self.handle_socket_ind(x)
+            }
             // We don't have any responses
             // We don't expect any Indications or Confirmations from other providers
             // If we get here, someone else has made a mistake
             _ => error!("Unexpected message in socket task: {:?}", msg),
         }
+    }
+
+    fn handle_socket_cfm(&mut self, msg: &SocketCfm) {
+
+    }
+
+    fn handle_socket_ind(&mut self, msg: &SocketInd) {
+        
     }
 
     fn handle_http_req(&mut self, msg: &HttpReq, reply_to: &::MessageSender) {

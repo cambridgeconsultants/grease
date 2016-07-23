@@ -72,6 +72,8 @@ fn main() {
     {
         let bind_req = http::ReqBind {
             context: 1,
+            // Allow any host header
+            server_name: None,
             addr: "0.0.0.0:8000".parse().unwrap(),
         };
         http_thread.send(bind_req.wrap(&tx)).unwrap();
