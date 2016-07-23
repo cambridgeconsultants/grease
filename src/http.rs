@@ -46,7 +46,7 @@ use std::net;
 use std::collections::HashMap;
 
 use rushttp;
-use ::socket::{SocketCfm, SocketInd};
+use ::socket;
 use ::prelude::*;
 
 // ****************************************************************************
@@ -90,17 +90,15 @@ pub enum HttpInd {
     Closed(Box<IndClosed>),
 }
 
-/// A bind request - start an HTTP server on a given port
+/// A bind request - start an HTTP server on a given port.
 #[derive(Debug)]
 pub struct ReqBind {
-    /// Use None to accept any hostname (default), otherwise
-    /// only accept with Host: header equal to this String.
-    pub server_name: Option<String>,
-    /// Which address to bind. If it's already bound, we re-use
-    /// the existing binding.
+    /// Which address to bind.
     pub addr: net::SocketAddr,
-    /// Reflected back in the cfm
+    /// Reflected back in the cfm, and in subsequent IndConnected
     pub context: ::Context,
+    /// Send IndConnected here.
+    pub ind_to: ::MessageSender
 }
 
 /// Send the headers for an HTTP response. Host, Content-Length
@@ -114,9 +112,10 @@ pub struct ReqResponseStart {
     pub context: ::Context,
     /// Content-type for the response, e.g. "text/html"
     pub content_type: String,
-    /// Length for the response - None means unbounded
+    /// Length for the response - None means unbounded and 0 means no body.
+    /// If there's no body, then ReqResponseClose should not be sent as it's implied.
     pub length: Option<usize>,
-    /// Any other headers required. Cow allows you to use String or &str.
+    /// Any other headers required.
     pub headers: HashMap<String, String>
 }
 
@@ -212,7 +211,32 @@ pub enum HttpErr {
 //
 // ****************************************************************************
 
-// None
+struct HttpServer {
+    /// Supplied in a `socket::CfmBind`
+    pub handle: socket::ListenHandle,
+    /// For reference, which socket address this is on
+    pub addr: net::SocketAddr,
+    /// context value from the `ReqBind`
+    pub context: ::Context,
+    /// Who to tell about the new connections we get
+    pub ind_to: ::MessageSender,
+    /// The connections we have
+    pub connections: Vec<HttpConnection>
+}
+
+struct HttpConnection {
+    /// The socket handle for this specific connection
+    pub handle: socket::ConnectedHandle,
+    /// The parser object we feed data through
+    pub parser: rushttp::http_request::HttpRequestParser
+}
+
+struct TaskContext {
+    /// Who we send socket messages to
+    socket: ::MessageSender,
+    /// Our list of servers
+    servers: Vec<HttpServer>
+}
 
 // ****************************************************************************
 //
@@ -220,9 +244,7 @@ pub enum HttpErr {
 //
 // ****************************************************************************
 
-struct TaskContext {
-    socket: ::MessageSender,
-}
+// None
 
 // ****************************************************************************
 //
@@ -262,7 +284,10 @@ fn main_loop(rx: ::MessageReceiver, socket: ::MessageSender) {
 
 impl TaskContext {
     fn new(socket: ::MessageSender) -> TaskContext {
-        TaskContext { socket: socket }
+        TaskContext {
+            socket: socket,
+            servers: Vec::new()
+        }
     }
 
     fn handle(&mut self, msg: ::Message) {
@@ -287,11 +312,11 @@ impl TaskContext {
         }
     }
 
-    fn handle_socket_cfm(&mut self, msg: &SocketCfm) {
+    fn handle_socket_cfm(&mut self, msg: &socket::SocketCfm) {
 
     }
 
-    fn handle_socket_ind(&mut self, msg: &SocketInd) {
+    fn handle_socket_ind(&mut self, msg: &socket::SocketInd) {
         
     }
 

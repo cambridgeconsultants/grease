@@ -72,9 +72,8 @@ fn main() {
     {
         let bind_req = http::ReqBind {
             context: 1,
-            // Allow any host header
-            server_name: None,
             addr: "0.0.0.0:8000".parse().unwrap(),
+            ind_to: tx.clone()
         };
         http_thread.send(bind_req.wrap(&tx)).unwrap();
         debug!("Got cfm for 8000 HTTP bind: {:?}", rx.recv().unwrap());
