@@ -98,7 +98,7 @@ pub struct ReqBind {
     /// Reflected back in the cfm, and in subsequent IndConnected
     pub context: ::Context,
     /// Send IndConnected here.
-    pub ind_to: ::MessageSender
+    pub ind_to: ::MessageSender,
 }
 
 /// Send the headers for an HTTP response. Host, Content-Length
@@ -116,7 +116,7 @@ pub struct ReqResponseStart {
     /// If there's no body, then ReqResponseClose should not be sent as it's implied.
     pub length: Option<usize>,
     /// Any other headers required.
-    pub headers: HashMap<String, String>
+    pub headers: HashMap<String, String>,
 }
 
 /// Send some body content for an HTTP response. Must be proceeded
@@ -140,7 +140,7 @@ pub struct ReqResponseClose {
 #[derive(Debug)]
 pub struct CfmBind {
     pub context: ::Context,
-    pub result: Result<ServerHandle, HttpErr>,
+    pub result: Result<ServerHandle, HttpError>,
 }
 
 /// Whether the ReqResponseStart was successfull
@@ -148,7 +148,7 @@ pub struct CfmBind {
 pub struct CfmResponseStart {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpErr>,
+    pub result: Result<(), HttpError>,
 }
 
 /// Confirms a ReqResponseBody has been sent
@@ -156,7 +156,7 @@ pub struct CfmResponseStart {
 pub struct CfmResponseBody {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpErr>,
+    pub result: Result<(), HttpError>,
 }
 
 /// Confirms the connection has been closed
@@ -164,7 +164,7 @@ pub struct CfmResponseBody {
 pub struct CfmResponseClose {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpErr>,
+    pub result: Result<(), HttpError>,
 }
 
 /// A new HTTP request has been received
@@ -196,13 +196,15 @@ pub type ServerHandle = ::Context;
 pub type ConnectionHandle = ::Context;
 
 /// All possible http task errors
-#[derive(Debug)]
-pub enum HttpErr {
+#[derive(Debug, Copy, Clone)]
+pub enum HttpError {
     /// Used when I'm writing code and haven't added the correct error yet
     Unknown,
     /// Used if a ReqResponseXXX is sent on an invalid (perhaps recently
     /// closed) ConnectionHandle
     BadHandle,
+    /// Socket bind failed,
+    SocketError(socket::SocketError),
 }
 
 // ****************************************************************************
@@ -211,31 +213,42 @@ pub enum HttpErr {
 //
 // ****************************************************************************
 
+struct ReplyContext {
+    pub reply_to: ::MessageSender,
+    pub context: ::Context,
+}
+
 struct HttpServer {
     /// Supplied in a `socket::CfmBind`
-    pub handle: socket::ListenHandle,
+    pub listen_handle: Option<socket::ListenHandle>,
     /// For reference, which socket address this is on
     pub addr: net::SocketAddr,
-    /// context value from the `ReqBind`
-    pub context: ::Context,
+    /// To whom we need to acknowledge the bind/unbind
+    pub reply_ctx: Option<ReplyContext>,
+    /// The handle by which the upper layer refers to us
+    pub our_handle: ServerHandle,
     /// Who to tell about the new connections we get
     pub ind_to: ::MessageSender,
     /// The connections we have
-    pub connections: Vec<HttpConnection>
+    pub connections: Vec<HttpConnection>,
 }
 
 struct HttpConnection {
     /// The socket handle for this specific connection
-    pub handle: socket::ConnectedHandle,
+    pub conn_handle: socket::ConnectedHandle,
     /// The parser object we feed data through
-    pub parser: rushttp::http_request::HttpRequestParser
+    pub parser: rushttp::http_request::HttpRequestParser,
 }
 
 struct TaskContext {
     /// Who we send socket messages to
     socket: ::MessageSender,
+    /// How other tasks send messages to us
+    reply_to: ::MessageSender,
     /// Our list of servers
-    servers: Vec<HttpServer>
+    servers: HashMap<::Context, HttpServer>,
+    /// The next context we use for downward messages
+    next_ctx: ::Context,
 }
 
 // ****************************************************************************
@@ -257,7 +270,7 @@ struct TaskContext {
 pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
     let local_socket = socket.clone();
     ::make_task("http",
-                move |rx: ::MessageReceiver| main_loop(rx, local_socket))
+                move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_socket))
 }
 
 // ****************************************************************************
@@ -270,8 +283,8 @@ pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
 /// Unfortunately, to use mio, we have to use their special
 /// channels. So, we spin up a thread to bounce from one
 /// channel to the other.
-fn main_loop(rx: ::MessageReceiver, socket: ::MessageSender) {
-    let mut t = TaskContext::new(socket);
+fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, socket: ::MessageSender) {
+    let mut t = TaskContext::new(socket, tx);
     loop {
         if let Ok(msg) = rx.recv() {
             t.handle(msg);
@@ -282,14 +295,29 @@ fn main_loop(rx: ::MessageReceiver, socket: ::MessageSender) {
     panic!("This task should never die!");
 }
 
+/// All our handler functions are methods on this TaskContext structure.
 impl TaskContext {
-    fn new(socket: ::MessageSender) -> TaskContext {
+    /// Create a new TaskContext
+    fn new(socket: ::MessageSender, us: ::MessageSender) -> TaskContext {
         TaskContext {
             socket: socket,
-            servers: Vec::new()
+            servers: HashMap::new(),
+            reply_to: us,
+            // This number is arbitrary
+            next_ctx: 2_000,
         }
     }
 
+    /// Get a new context number, which doesn't match any of the previous
+    /// context numbers (unless we've been running for a really really long time).
+    fn get_ctx(&mut self) -> ::Context {
+        let result = self.next_ctx;
+        self.next_ctx = self.next_ctx + 1;
+        result
+    }
+
+    /// Handle an incoming message. It might a `Request` for us,
+    /// or it might be a `Confirmation` or `Indication` from a lower layer.
     fn handle(&mut self, msg: ::Message) {
         match msg {
             // We only handle our own requests and responses
@@ -299,29 +327,65 @@ impl TaskContext {
             ::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
                 self.handle_generic_req(x, reply_to)
             }
-            ::Message::Confirmation(::Confirmation::Socket(ref x)) => {
-                self.handle_socket_cfm(x)
-            }
-            ::Message::Indication(::Indication::Socket(ref x)) => {
-                self.handle_socket_ind(x)
-            }
-            // We don't have any responses
-            // We don't expect any Indications or Confirmations from other providers
+            // We use the socket task so we expect to get confirmations and indications from it
+            ::Message::Confirmation(::Confirmation::Socket(ref x)) => self.handle_socket_cfm(x),
+            ::Message::Indication(::Indication::Socket(ref x)) => self.handle_socket_ind(x),
             // If we get here, someone else has made a mistake
-            _ => error!("Unexpected message in socket task: {:?}", msg),
+            _ => error!("Unexpected message in http task: {:?}", msg),
         }
     }
 
+    /// Handle an incoming `Confirmation` from the socket task
     fn handle_socket_cfm(&mut self, msg: &socket::SocketCfm) {
-
+        match *msg {
+            socket::SocketCfm::Bind(ref x) => self.handle_socket_bind(x),
+            socket::SocketCfm::Unbind(ref x) => self.handle_socket_unbind(x),
+            socket::SocketCfm::Close(ref x) => self.handle_socket_close(x),
+            socket::SocketCfm::Send(ref x) => self.handle_socket_send(x),
+        }
     }
 
-    fn handle_socket_ind(&mut self, msg: &socket::SocketInd) {
-        
+    /// Handle a response to a socket task bind request. It's either
+    /// bound our socket, or it failed, but either way we must let
+    /// our user know.
+    fn handle_socket_bind(&mut self, msg: &socket::CfmBind) {
+        if let Some(ref mut server) = self.servers.get_mut(&msg.context) {
+            if let Some(ref reply_ctx) = server.reply_ctx {
+                match msg.result {
+                    Ok(ref handle) => {
+                        server.listen_handle = Some(*handle);
+                        let cfm = CfmBind {
+                            context: reply_ctx.context,
+                            result: Ok(server.our_handle),
+                        };
+                        reply_ctx.reply_to.send(cfm.wrap()).unwrap();
+                    }
+                    Err(ref err) => {
+                        let cfm = CfmBind {
+                            context: reply_ctx.context,
+                            result: Err(HttpError::SocketError(*err)),
+                        };
+                        reply_ctx.reply_to.send(cfm.wrap()).unwrap();
+                    }
+                }
+            } else {
+                warn!("Got CfmBind but no reply_ctx. Ignoring.");
+            }
+            server.reply_ctx = None
+        } else {
+            warn!("Context {} not found", msg.context);
+        }
     }
+
+    fn handle_socket_unbind(&mut self, _: &socket::CfmUnbind) {}
+
+    fn handle_socket_close(&mut self, _: &socket::CfmClose) {}
+
+    fn handle_socket_send(&mut self, _: &socket::CfmSend) {}
+
+    fn handle_socket_ind(&mut self, _: &socket::SocketInd) {}
 
     fn handle_http_req(&mut self, msg: &HttpReq, reply_to: &::MessageSender) {
-        debug!("request: {:?}", msg);
         match *msg {
             HttpReq::Bind(ref x) => self.handle_bind(x, reply_to),
             HttpReq::ResponseStart(ref x) => self.handle_responsestart(x, reply_to),
@@ -332,12 +396,24 @@ impl TaskContext {
     }
 
     fn handle_bind(&mut self, msg: &ReqBind, reply_to: &::MessageSender) {
-        debug!("handle_bind: {:?}", msg);
-        let cfm = CfmBind {
+        let reply_ctx = ReplyContext {
             context: msg.context,
-            result: Err(HttpErr::Unknown),
+            reply_to: reply_to.clone(),
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        let server = HttpServer {
+            listen_handle: None,
+            addr: msg.addr,
+            reply_ctx: Some(reply_ctx),
+            our_handle: self.get_ctx(),
+            ind_to: msg.ind_to.clone(),
+            connections: Vec::new(),
+        };
+        let req = socket::ReqBind {
+            addr: msg.addr,
+            context: server.our_handle,
+        };
+        self.socket.send(req.wrap(&self.reply_to)).unwrap();
+        self.servers.insert(server.our_handle, server);
     }
 
     fn handle_responsestart(&mut self, msg: &ReqResponseStart, reply_to: &::MessageSender) {
@@ -345,7 +421,7 @@ impl TaskContext {
         let cfm = CfmResponseStart {
             context: msg.context,
             handle: msg.handle,
-            result: Err(HttpErr::Unknown),
+            result: Err(HttpError::Unknown),
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -355,7 +431,7 @@ impl TaskContext {
         let cfm = CfmResponseBody {
             context: msg.context,
             handle: msg.handle,
-            result: Err(HttpErr::Unknown),
+            result: Err(HttpError::Unknown),
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -365,7 +441,7 @@ impl TaskContext {
         let cfm = CfmResponseClose {
             context: msg.context,
             handle: msg.handle,
-            result: Err(HttpErr::Unknown),
+            result: Err(HttpError::Unknown),
         };
         reply_to.send(cfm.wrap()).unwrap();
     }

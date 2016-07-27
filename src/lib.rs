@@ -167,7 +167,7 @@ pub struct PingCfm {
 /// Helper function to create a new thread.
 ///
 /// ```
-/// fn main_loop(rx: cuslip::MessageReceiver) {
+/// fn main_loop(rx: cuslip::MessageReceiver, _: cuslip::MessageSender) {
 ///     loop {
 ///         let _ = rx.recv().unwrap();
 ///     }
@@ -177,12 +177,14 @@ pub struct PingCfm {
 /// # }
 /// ```
 pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
-    where F: FnOnce(MessageReceiver),
+    where F: FnOnce(MessageReceiver, MessageSender),
           F: Send + 'static
 {
     let (sender, receiver) = make_channel();
     let angle_name = format!("<{}>", name);
-    let _ = thread::Builder::new().name(angle_name).spawn(move || main_loop(receiver));
+    let sender_clone = sender.clone();
+    let _ =
+        thread::Builder::new().name(angle_name).spawn(move || main_loop(receiver, sender_clone));
     return sender;
 }
 

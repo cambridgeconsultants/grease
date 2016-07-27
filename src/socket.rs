@@ -84,6 +84,8 @@ pub enum SocketRsp {
 pub struct ReqBind {
     /// The address to bind to
     pub addr: net::SocketAddr,
+    /// Reflected in the cfm
+    pub context: ::Context,
 }
 
 /// Unbind a bound listen socket
@@ -91,6 +93,8 @@ pub struct ReqBind {
 pub struct ReqUnbind {
     /// The handle from a CfmBind
     pub handle: ConnectedHandle,
+    /// Reflected in the cfm
+    pub context: ::Context,
 }
 
 /// Close an open connection
@@ -98,6 +102,8 @@ pub struct ReqUnbind {
 pub struct ReqClose {
     /// The handle from a IndConnected
     pub handle: ConnectedHandle,
+    /// Reflected in the cfm
+    pub context: ::Context,
 }
 
 /// Send something on a connection
@@ -105,7 +111,7 @@ pub struct ReqSend {
     /// The handle from a CfmBind
     pub handle: ConnectedHandle,
     /// Some (maybe) unique identifier
-    pub context: WriteContext,
+    pub context: ::Context,
     /// The data to be sent
     pub data: Vec<u8>,
 }
@@ -115,6 +121,8 @@ pub struct ReqSend {
 pub struct CfmBind {
     /// Either a new ListenHandle or an error
     pub result: Result<ListenHandle, SocketError>,
+    /// Reflected from the req
+    pub context: ::Context,
 }
 
 /// Reply to a ReqUnbind.
@@ -124,6 +132,8 @@ pub struct CfmUnbind {
     pub handle: ListenHandle,
     /// Whether we were successful in unbinding
     pub result: Result<(), SocketError>,
+    /// Reflected from the req
+    pub context: ::Context,
 }
 
 /// Reply to a ReqClose. Will flush out all
@@ -134,6 +144,8 @@ pub struct CfmClose {
     pub handle: ConnectedHandle,
     /// Success or failed
     pub result: Result<(), SocketError>,
+    /// Reflected from the req
+    pub context: ::Context,
 }
 
 /// Reply to a ReqSend. The data has not necessarily
@@ -145,7 +157,7 @@ pub struct CfmSend {
     /// Amount sent or error
     pub result: Result<::Context, SocketError>,
     /// Some (maybe) unique identifier
-    pub context: WriteContext,
+    pub context: ::Context,
 }
 
 /// Indicates that a listening socket has been connected to.
@@ -197,15 +209,12 @@ pub type ListenHandle = ::Context;
 /// Uniquely identifies an open socket
 pub type ConnectedHandle = ::Context;
 
-/// Allows a user to track multiple writes
-pub type WriteContext = ::Context;
-
 /// All possible errors the Socket task might want to
 /// report.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum SocketError {
     /// An underlying socket error
-    IOError(io::Error),
+    IOError(io::ErrorKind),
     /// The given handle was not recognised
     BadHandle,
     /// The pending write failed because the socket dropped
@@ -231,7 +240,7 @@ struct ListenSocket {
 
 /// Create for every pending write
 struct PendingWrite {
-    context: WriteContext,
+    context: ::Context,
     sent: usize,
     data: Vec<u8>,
 }
@@ -297,8 +306,9 @@ pub fn make_task() -> ::MessageSender {
 /// The task runs this main loop indefinitely.
 /// Unfortunately, to use mio, we have to use their special
 /// channels. So, we spin up a thread to bounce from one
-/// channel to the other.
-fn main_loop(rx: ::MessageReceiver) {
+/// channel to the other. We don't need our own
+/// MessageSender as we don't send Requests that need replying to.
+fn main_loop(rx: ::MessageReceiver, _: ::MessageSender) {
     let mut event_loop = mio::EventLoop::new().unwrap();
     let ch = event_loop.channel();
     let _ = thread::spawn(move || {
@@ -406,8 +416,8 @@ impl TaskContext {
             listeners: HashMap::new(),
             connections: HashMap::new(),
             // It helps the debug to keep these two apart
-            next_listen: 0,
-            next_open: 1_000_000,
+            next_listen: 3_000,
+            next_open: 4_000,
         }
     }
 
@@ -573,12 +583,25 @@ impl TaskContext {
                                           mio::PollOpt::edge()) {
                     Ok(_) => {
                         self.listeners.insert(h, l);
-                        CfmBind { result: Ok(h) }
+                        CfmBind {
+                            result: Ok(h),
+                            context: msg.context,
+                        }
                     }
-                    Err(io_error) => CfmBind { result: Err(io_error.into()) },
+                    Err(io_error) => {
+                        CfmBind {
+                            result: Err(io_error.into()),
+                            context: msg.context,
+                        }
+                    }
                 }
             }
-            Err(io_error) => CfmBind { result: Err(io_error.into()) },
+            Err(io_error) => {
+                CfmBind {
+                    result: Err(io_error.into()),
+                    context: msg.context,
+                }
+            }
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -591,6 +614,7 @@ impl TaskContext {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
             handle: msg.handle,
+            context: msg.context,
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -600,6 +624,7 @@ impl TaskContext {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
             handle: msg.handle,
+            context: msg.context,
         };
         reply_to.send(cfm.wrap()).unwrap();
     }
@@ -834,7 +859,7 @@ impl fmt::Debug for ReqSend {
 /// Wrap io::Errors into SocketErrors easily
 impl From<io::Error> for SocketError {
     fn from(e: io::Error) -> SocketError {
-        SocketError::IOError(e)
+        SocketError::IOError(e.kind())
     }
 }
 

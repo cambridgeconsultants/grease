@@ -73,19 +73,22 @@ fn main() {
         let bind_req = http::ReqBind {
             context: 1,
             addr: "0.0.0.0:8000".parse().unwrap(),
-            ind_to: tx.clone()
+            ind_to: tx.clone(),
         };
         http_thread.send(bind_req.wrap(&tx)).unwrap();
         debug!("Got cfm for 8000 HTTP bind: {:?}", rx.recv().unwrap());
     }
 
     {
-        let bind_req = socket::ReqBind { addr: "0.0.0.0:8001".parse().unwrap() };
+        let bind_req = socket::ReqBind {
+            context: 2,
+            addr: "0.0.0.0:8001".parse().unwrap(),
+        };
         socket_thread.send(bind_req.wrap(&tx)).unwrap();
         debug!("Got cfm for 8001 raw socket bind: {:?}", rx.recv().unwrap());
     }
 
-    let mut n: cuslip::socket::WriteContext = 0;
+    let mut n: cuslip::Context = 0;
 
     loop {
         debug!("Sleeping...");
