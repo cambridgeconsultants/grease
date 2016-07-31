@@ -2,4 +2,6 @@ target
 Cargo.lock
 src/*.bk
 README.html
+*.sublime-workspace
+
 
