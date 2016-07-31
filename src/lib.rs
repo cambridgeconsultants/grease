@@ -64,6 +64,7 @@
 extern crate log;
 extern crate mio;
 extern crate rushttp;
+extern crate multi_map;
 
 pub mod socket;
 pub mod prelude;

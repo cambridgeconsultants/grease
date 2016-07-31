@@ -13,3 +13,4 @@ env_logger = "0.3"
 time = "0.1"
 mio = "0.5"
 rushttp = { git = "https://github.com/thejpster/rushttp.git" }
+multi-map = "^1.0"

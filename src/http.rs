@@ -44,6 +44,7 @@
 
 use std::net;
 use std::collections::HashMap;
+use multi_map::MultiMap;
 
 use rushttp;
 use ::socket;
@@ -222,11 +223,13 @@ struct HttpServer {
     pub our_handle: ServerHandle,
     /// Who to tell about the new connections we get
     pub ind_to: ::MessageSender,
-    /// The connections we have
-    pub connections: Vec<HttpConnection>,
 }
 
 struct HttpConnection {
+    /// The handle by which the upper layer refers to us
+    pub our_handle: ConnectionHandle,
+    /// The server we were spawned for
+    pub server_handle: ServerHandle,
     /// The socket handle for this specific connection
     pub conn_handle: socket::ConnectedHandle,
     /// The parser object we feed data through
@@ -238,8 +241,10 @@ struct TaskContext {
     socket: ::MessageSender,
     /// How other tasks send messages to us
     reply_to: ::MessageSender,
-    /// Our list of servers
-    servers: HashMap<::Context, HttpServer>,
+    /// Our list of servers, indexed by the handle given in CfmBind
+    servers: MultiMap<ServerHandle, Option<socket::ListenHandle>, HttpServer>,
+    /// Our list of connections, indexed by the handle given in IndConnected
+    connections: MultiMap<ConnectionHandle, socket::ConnectedHandle, HttpConnection>,
     /// The next context we use for downward messages
     next_ctx: ::Context,
 }
@@ -290,7 +295,8 @@ impl TaskContext {
     fn new(socket: ::MessageSender, us: ::MessageSender) -> TaskContext {
         TaskContext {
             socket: socket,
-            servers: HashMap::new(),
+            servers: MultiMap::new(),
+            connections: MultiMap::new(),
             reply_to: us,
             // This number is arbitrary
             next_ctx: 2_000,
@@ -327,52 +333,96 @@ impl TaskContext {
     /// Handle an incoming `Confirmation` from the socket task
     fn handle_socket_cfm(&mut self, cfm: &socket::SocketCfm) {
         match *cfm {
-            socket::SocketCfm::Bind(ref x) => self.handle_socket_bind(x),
-            socket::SocketCfm::Unbind(ref x) => self.handle_socket_unbind(x),
-            socket::SocketCfm::Close(ref x) => self.handle_socket_close(x),
-            socket::SocketCfm::Send(ref x) => self.handle_socket_send(x),
+            socket::SocketCfm::Bind(ref x) => self.handle_socket_cfm_bind(x),
+            socket::SocketCfm::Unbind(ref x) => self.handle_socket_cfm_unbind(x),
+            socket::SocketCfm::Close(ref x) => self.handle_socket_cfm_close(x),
+            socket::SocketCfm::Send(ref x) => self.handle_socket_cfm_send(x),
         }
     }
 
     /// Handle a response to a socket task bind request. It's either
     /// bound our socket, or it failed, but either way we must let
     /// our user know.
-    fn handle_socket_bind(&mut self, cfm_bind: &socket::CfmBind) {
-        if let Some(ref mut server) = self.servers.get_mut(&cfm_bind.context) {
-            if let Some(ref reply_ctx) = server.reply_ctx {
-                match cfm_bind.result {
-                    Ok(ref handle) => {
-                        server.listen_handle = Some(*handle);
-                        let cfm = CfmBind {
-                            context: reply_ctx.context,
-                            result: Ok(server.our_handle),
-                        };
-                        reply_ctx.reply_to.send_nonrequest(cfm);
-                    }
-                    Err(ref err) => {
-                        let cfm = CfmBind {
-                            context: reply_ctx.context,
-                            result: Err(HttpError::SocketError(*err)),
-                        };
-                        reply_ctx.reply_to.send_nonrequest(cfm);
-                    }
+    fn handle_socket_cfm_bind(&mut self, cfm_bind: &socket::CfmBind) {
+        if let Some(mut server) = self.servers.remove(&cfm_bind.context) {
+            let reply_ctx = server.reply_ctx.unwrap();
+            server.reply_ctx = None;
+            match cfm_bind.result {
+                Ok(ref handle) => {
+                    server.listen_handle = Some(*handle);
+                    let cfm = CfmBind {
+                        context: reply_ctx.context,
+                        result: Ok(server.our_handle),
+                    };
+                    // Re-insert, but with socket handle as second key
+                    reply_ctx.reply_to.send_nonrequest(cfm);
+                    self.servers.insert(cfm_bind.context, Some(*handle), server);
                 }
-            } else {
-                warn!("Got CfmBind but no reply_ctx. Ignoring.");
+                Err(ref err) => {
+                    let cfm = CfmBind {
+                        context: reply_ctx.context,
+                        result: Err(HttpError::SocketError(*err)),
+                    };
+                    reply_ctx.reply_to.send_nonrequest(cfm);
+                }
             }
-            server.reply_ctx = None
         } else {
             warn!("Context {} not found", cfm_bind.context);
         }
     }
 
-    fn handle_socket_unbind(&mut self, _: &socket::CfmUnbind) {}
+    fn handle_socket_cfm_unbind(&mut self, cfm: &socket::CfmUnbind) {
+        debug!("Got {:?}", cfm);
+    }
 
-    fn handle_socket_close(&mut self, _: &socket::CfmClose) {}
+    fn handle_socket_cfm_close(&mut self, cfm: &socket::CfmClose) {
+        debug!("Got {:?}", cfm);
+    }
 
-    fn handle_socket_send(&mut self, _: &socket::CfmSend) {}
+    fn handle_socket_cfm_send(&mut self, cfm: &socket::CfmSend) {
+        debug!("Got {:?}", cfm);
+    }
 
-    fn handle_socket_ind(&mut self, _: &socket::SocketInd) {}
+    fn handle_socket_ind(&mut self, ind: &socket::SocketInd) {
+        match *ind {
+            socket::SocketInd::Connected(ref x) => self.handle_socket_ind_connected(x),
+            socket::SocketInd::Dropped(ref x) => self.handle_socket_ind_dropped(x),
+            socket::SocketInd::Received(ref x) => self.handle_socket_ind_received(x),
+        }
+    }
+
+    fn handle_socket_ind_connected(&mut self, ind: &socket::IndConnected) {
+        debug!("Got {:?}", ind);
+        let mut server_handle = None;
+        if let Some(ref server) = self.get_server_by_socket_handle(ind.listen_handle) {
+            server_handle = Some(server.our_handle);
+        }
+        if server_handle.is_some() {
+            debug!("New connection on {:?}!", server_handle);
+            let conn = HttpConnection {
+                our_handle: self.get_ctx(),
+                server_handle: server_handle.unwrap(),
+                conn_handle: ind.open_handle,
+                parser: rushttp::http_request::HttpRequestParser::new(),
+            };
+            self.connections.insert(conn.our_handle, conn.conn_handle, conn);
+        } else {
+            warn!("Connection on non-existant socket handle");
+        }
+    }
+
+    fn handle_socket_ind_dropped(&mut self, ind: &socket::IndDropped) {
+        self.connections.remove_alt(&ind.handle);
+    }
+
+    fn handle_socket_ind_received(&mut self, ind: &socket::IndReceived) {
+        debug!("Got {:?}", ind);
+        if let Some(ref mut conn) = self.get_conn_by_socket_handle(ind.handle) {
+            debug!("Got data for conn {:?}!", conn.our_handle);
+        } else {
+            warn!("Drop on non-existant socket handle");
+        }
+    }
 
     fn handle_http_req(&mut self, req: &HttpReq, reply_to: &::MessageSender) {
         match *req {
@@ -394,14 +444,23 @@ impl TaskContext {
             reply_ctx: Some(reply_ctx),
             our_handle: self.get_ctx(),
             ind_to: reply_to.clone(),
-            connections: Vec::new(),
         };
         let req = socket::ReqBind {
             addr: req_bind.addr,
             context: server.our_handle,
         };
         self.socket.send_request(req, &self.reply_to);
-        self.servers.insert(server.our_handle, server);
+        self.servers.insert(server.our_handle, None, server);
+    }
+
+    fn get_server_by_socket_handle(&mut self, handle: socket::ListenHandle) -> Option<&HttpServer> {
+        self.servers.get_alt(&Some(handle))
+    }
+
+    fn get_conn_by_socket_handle(&mut self,
+                                 handle: socket::ConnectedHandle)
+                                 -> Option<&HttpConnection> {
+        self.connections.get_alt(&handle)
     }
 
     fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &::MessageSender) {
