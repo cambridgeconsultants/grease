@@ -1,5 +1,5 @@
-# cuslip
-## copper slip makes threads go smoothly when you have Rust
+# grease
+## Grease makes threads go smoothly when you have Rust
 
 Cuslip is designed to encourage a message-passing based approach to stack development.
 
@@ -48,7 +48,7 @@ Often it is useful to describe these interaction via the medium of the Message S
        |                 |
 ```
 
-Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task has a single multiple-producer, single-consumer (mpsc) channel. Both *Indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel. The helper function cuslip::make_channel() makes an std::sync::mpsc::Channel of the correct type.
+Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task has a single multiple-producer, single-consumer (mpsc) channel. Both *Indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel. The helper function grease::make_channel() makes an std::sync::mpsc::Channel of the correct type.
 
 # Example Application
 

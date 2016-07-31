@@ -1,6 +1,6 @@
 [package]
-name = "cuslip"
-version = "0.1.0"
+name = "grease"
+version = "0.2.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
 
 [[bin]]

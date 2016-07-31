@@ -1,6 +1,6 @@
-//! # cuslip Sockets
+//! # grease Sockets
 //!
-//! The cuslip socket task makes handling sockets easier. A user requests the
+//! The grease socket task makes handling sockets easier. A user requests the
 //! socket task opens a new socket and it does so (if possible). The user then
 //! receives asynchronous indications when data arrives on the socket and/or
 //! when the socket closes.
@@ -243,7 +243,7 @@ struct PendingWrite {
     context: ::Context,
     sent: usize,
     data: Vec<u8>,
-    reply_to: ::MessageSender
+    reply_to: ::MessageSender,
 }
 
 /// Created for every connection receieved on a ListenSocket
@@ -619,7 +619,10 @@ impl TaskContext {
     }
 
     /// Handle a ReqClose
-    fn handle_close(&mut self, _: &mut TaskEventLoop, req_close: &ReqClose, reply_to: &::MessageSender) {
+    fn handle_close(&mut self,
+                    _: &mut TaskEventLoop,
+                    req_close: &ReqClose,
+                    reply_to: &::MessageSender) {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
             handle: req_close.handle,
@@ -629,7 +632,10 @@ impl TaskContext {
     }
 
     /// Handle a ReqSend
-    fn handle_send(&mut self, _: &mut TaskEventLoop, req_send: &ReqSend, reply_to: &::MessageSender) {
+    fn handle_send(&mut self,
+                   _: &mut TaskEventLoop,
+                   req_send: &ReqSend,
+                   reply_to: &::MessageSender) {
         if let Some(cs) = self.connections.get_mut(&req_send.handle) {
             let to_send = req_send.data.len();
             // Let's see how much we can get rid off right now

@@ -1,17 +1,17 @@
-//! # cuslip - Making threads easier when you have rust.
+//! # grease - Making threads easier when you have rust.
 //!
 //! ## Overview
 //!
-//! For an high level overview to cuslip, see the project's README.md file.
+//! For an high level overview to grease, see the project's README.md file.
 //!
-//! cuslip is a message-passing system, and messages are passed between tasks.
+//! grease is a message-passing system, and messages are passed between tasks.
 //! Tasks receive messages and act on them - be that, sending an immediate reply
 //! or communicating with a task lower down (or some other subsystem) before
 //! replying. Typically, tasks will implement a Finite State Machine (FSM) to
 //! control their actions.
 //!
 //! Each task should be in its own module, and it should implement some sort
-//! of init function which calls `cuslip::make_task`, passing in a function
+//! of init function which calls `grease::make_task`, passing in a function
 //! which forms the tasks main loop.
 //!
 //! This main loop should repeatedly call the blocking `recv()` method on the
@@ -20,10 +20,10 @@
 //!
 //! ## Messages
 //!
-//! Messages in cuslip are boxed Structs, wrapped inside a nested enum which
+//! Messages in grease are boxed Structs, wrapped inside a nested enum which
 //! identifies which Struct they are. This allows them to be passed through a
 //! `std::sync::mpsc::Channel`, which is the message passing system underneath
-//! cuslip. The Box ensures the messages are all small, as opposed to all
+//! grease. The Box ensures the messages are all small, as opposed to all
 //! being the size of the largest message. The `Channel` is wrapped in a
 //! `MessageSender` object, which you keep, and pass around copies created
 //! with `clone()`.
@@ -41,11 +41,11 @@
 //!
 //! ## Usage
 //!
-//! To use cuslip, make sure your program/crate has:
+//! To use grease, make sure your program/crate has:
 //!
 //! ```
-//! use cuslip::prelude::*;
-//! use cuslip;
+//! use grease::prelude::*;
+//! use grease;
 //! ```
 //!
 //! You will also need to modify the `Message` enum (and its nested enums within)
@@ -199,13 +199,13 @@ pub struct PingCfm {
 /// Helper function to create a new thread.
 ///
 /// ```
-/// fn main_loop(rx: cuslip::MessageReceiver, _: cuslip::MessageSender) {
+/// fn main_loop(rx: grease::MessageReceiver, _: grease::MessageSender) {
 ///     loop {
 ///         let _ = rx.recv().unwrap();
 ///     }
 /// }
 /// # fn main() {
-/// cuslip::make_task("foo", main_loop);
+/// grease::make_task("foo", main_loop);
 /// # }
 /// ```
 pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
@@ -273,7 +273,6 @@ impl MessageSender {
 
 /// This wraps up an mpsc::Sender, performing a bit of repetitive boilerplate code.
 impl MessageReceiver {
-
     /// Useful for test code, but a task implementation should call `iter` in preference.
     pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
         self.0.recv()

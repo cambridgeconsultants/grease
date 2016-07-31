@@ -1,4 +1,4 @@
-//! # cuslip - example application
+//! # grease - example application
 
 // ****************************************************************************
 //
@@ -6,7 +6,7 @@
 //
 // ****************************************************************************
 
-extern crate cuslip;
+extern crate grease;
 extern crate env_logger;
 #[macro_use]
 extern crate log;
@@ -15,7 +15,7 @@ extern crate time;
 use std::env;
 use std::thread;
 
-use cuslip::{http, socket};
+use grease::{http, socket};
 use env_logger::LogBuilder;
 use log::{LogRecord, LogLevelFilter};
 
@@ -61,12 +61,12 @@ fn main() {
     }
     builder.init().unwrap();
 
-    info!("Hello, this is cuslip (pronounced copper-slip).");
+    info!("Hello, this is grease.");
     info!("It's what you put on threads when you have rust issues...");
 
     let socket_thread = socket::make_task();
     let http_thread = http::make_task(&socket_thread);
-    let (tx, rx) = cuslip::make_channel();
+    let (tx, rx) = grease::make_channel();
 
     {
         let bind_req = http::ReqBind {
@@ -86,13 +86,13 @@ fn main() {
         debug!("Got cfm for 8001 raw socket bind: {:?}", rx.recv().unwrap());
     }
 
-    let mut n: cuslip::Context = 0;
+    let mut n: grease::Context = 0;
 
     loop {
         debug!("Sleeping...");
         let ind = rx.recv().unwrap();
-        if let cuslip::Message::Indication(
-            cuslip::Indication::Socket(
+        if let grease::Message::Indication(
+            grease::Indication::Socket(
                 socket::SocketInd::Received(ref ind_rcv))) = ind {
             info!("Got {} bytes of input", ind_rcv.data.len());
             let recv_rsp = socket::RspReceived { handle: ind_rcv.handle };

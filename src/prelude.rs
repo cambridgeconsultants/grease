@@ -1,12 +1,12 @@
-//! # cuslip - Making threads easier when you have rust.
+//! # grease - Making threads easier when you have rust.
 //!
-//! Contains traits that users of cuslip should probably have in scope.
+//! Contains traits that users of grease should probably have in scope.
 //!
-//! To use cuslip, make sure your program/crate has:
+//! To use grease, make sure your program/crate has:
 //!
 //! ```
-//! use cuslip::prelude::*;
-//! use cuslip;
+//! use grease::prelude::*;
+//! use grease;
 //! ```
 
 // ****************************************************************************
