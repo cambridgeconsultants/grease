@@ -313,12 +313,8 @@ fn main_loop(rx: ::MessageReceiver, _: ::MessageSender) {
     let mut event_loop = mio::EventLoop::new().unwrap();
     let ch = event_loop.channel();
     let _ = thread::spawn(move || {
-        loop {
-            if let Ok(msg) = rx.recv() {
-                ch.send(msg).unwrap();
-            } else {
-                break;
-            }
+        for msg in rx.iter() {
+            ch.send(msg).unwrap();
         }
     });
     let mut task_context = TaskContext::new();
@@ -444,13 +440,13 @@ impl TaskContext {
                                       mio::EventSet::writable(),
                                       mio::PollOpt::edge()) {
                 Ok(_) => {
-                    let msg = IndConnected {
+                    let ind = IndConnected {
                         listen_handle: ls.handle,
                         open_handle: cs.handle,
                         peer: conn_addr.1,
                     };
                     self.connections.insert(cs.handle, cs);
-                    ls.ind_to.send_message(msg);
+                    ls.ind_to.send_nonrequest(ind);
                 }
                 Err(err) => warn!("Fumbled incoming connection: {}", err),
             }
@@ -482,7 +478,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Ok(to_send),
                         };
-                        pw.reply_to.send_message(cfm);
+                        pw.reply_to.send_nonrequest(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -491,7 +487,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Err(err.into()),
                         };
-                        pw.reply_to.send_message(cfm);
+                        pw.reply_to.send_nonrequest(cfm);
                         break;
                     }
                 }
@@ -520,7 +516,7 @@ impl TaskContext {
                         data: buffer,
                     };
                     cs.outstanding = true;
-                    cs.ind_to.send_message(ind);
+                    cs.ind_to.send_nonrequest(ind);
                 }
                 Err(_) => {}
             }
@@ -532,18 +528,18 @@ impl TaskContext {
         // We know this exists because we checked it before we got here
         {
             let cs = self.connections.get(&cs_handle).unwrap();
-            let msg = IndDropped { handle: cs_handle };
-            cs.ind_to.send_message(msg);
+            let ind = IndDropped { handle: cs_handle };
+            cs.ind_to.send_nonrequest(ind);
         }
         self.connections.remove(&cs_handle);
     }
 
     /// Handle generic requests
-    pub fn handle_generic_req(&mut self, msg: &::GenericReq, reply_to: &::MessageSender) {
-        match *msg {
+    pub fn handle_generic_req(&mut self, req: &::GenericReq, reply_to: &::MessageSender) {
+        match *req {
             ::GenericReq::Ping(ref x) => {
                 let cfm = ::PingCfm { context: x.context };
-                reply_to.send_message(cfm);
+                reply_to.send_nonrequest(cfm);
             }
         }
     }
@@ -551,10 +547,10 @@ impl TaskContext {
     /// Handle requests
     pub fn handle_socket_req(&mut self,
                              event_loop: &mut TaskEventLoop,
-                             msg: &SocketReq,
+                             req: &SocketReq,
                              reply_to: &::MessageSender) {
-        debug!("request: {:?}", msg);
-        match *msg {
+        debug!("request: {:?}", req);
+        match *req {
             SocketReq::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
             SocketReq::Unbind(ref x) => self.handle_unbind(event_loop, x, reply_to),
             SocketReq::Close(ref x) => self.handle_close(event_loop, x, reply_to),
@@ -565,16 +561,18 @@ impl TaskContext {
     /// Open a new socket with the given parameters.
     fn handle_bind(&mut self,
                    event_loop: &mut TaskEventLoop,
-                   msg: &ReqBind,
+                   req_bind: &ReqBind,
                    reply_to: &::MessageSender) {
-        info!("Binding {}...", msg.addr);
-        let cfm = match mio::tcp::TcpListener::bind(&msg.addr) {
+        info!("Binding {}...", req_bind.addr);
+        let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
             Ok(server) => {
                 let h = self.next_listen;
                 self.next_listen += 1;
                 debug!("Allocated listen handle {}", h);
                 let l = ListenSocket {
                     handle: h,
+                    // We assume any future indications should be sent
+                    // to the same place we send the CfmBind.
                     ind_to: reply_to.clone(),
                     listener: server,
                 };
@@ -586,13 +584,13 @@ impl TaskContext {
                         self.listeners.insert(h, l);
                         CfmBind {
                             result: Ok(h),
-                            context: msg.context,
+                            context: req_bind.context,
                         }
                     }
                     Err(io_error) => {
                         CfmBind {
                             result: Err(io_error.into()),
-                            context: msg.context,
+                            context: req_bind.context,
                         }
                     }
                 }
@@ -600,61 +598,61 @@ impl TaskContext {
             Err(io_error) => {
                 CfmBind {
                     result: Err(io_error.into()),
-                    context: msg.context,
+                    context: req_bind.context,
                 }
             }
         };
-        reply_to.send_message(cfm);
+        reply_to.send_nonrequest(cfm);
     }
 
     /// Handle a ReqUnbind.
     fn handle_unbind(&mut self,
                      _: &mut TaskEventLoop,
-                     msg: &ReqUnbind,
+                     req_unbind: &ReqUnbind,
                      reply_to: &::MessageSender) {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
-            handle: msg.handle,
-            context: msg.context,
+            handle: req_unbind.handle,
+            context: req_unbind.context,
         };
-        reply_to.send_message(cfm);
+        reply_to.send_nonrequest(cfm);
     }
 
     /// Handle a ReqClose
-    fn handle_close(&mut self, _: &mut TaskEventLoop, msg: &ReqClose, reply_to: &::MessageSender) {
+    fn handle_close(&mut self, _: &mut TaskEventLoop, req_close: &ReqClose, reply_to: &::MessageSender) {
         let cfm = CfmClose {
             result: Err(SocketError::NotImplemented),
-            handle: msg.handle,
-            context: msg.context,
+            handle: req_close.handle,
+            context: req_close.context,
         };
-        reply_to.send_message(cfm);
+        reply_to.send_nonrequest(cfm);
     }
 
     /// Handle a ReqSend
-    fn handle_send(&mut self, _: &mut TaskEventLoop, msg: &ReqSend, reply_to: &::MessageSender) {
-        if let Some(cs) = self.connections.get_mut(&msg.handle) {
-            let to_send = msg.data.len();
+    fn handle_send(&mut self, _: &mut TaskEventLoop, req_send: &ReqSend, reply_to: &::MessageSender) {
+        if let Some(cs) = self.connections.get_mut(&req_send.handle) {
+            let to_send = req_send.data.len();
             // Let's see how much we can get rid off right now
             if cs.pending_writes.len() > 0 {
                 debug!("Storing write len {}", to_send);
                 let pw = PendingWrite {
                     sent: 0,
-                    context: msg.context,
-                    data: msg.data.clone(),
-                    reply_to: reply_to.clone()
+                    context: req_send.context,
+                    data: req_send.data.clone(),
+                    reply_to: reply_to.clone(),
                 };
                 cs.pending_writes.push_back(pw);
                 // No cfm here - we wait
             } else {
-                match cs.connection.write(&msg.data) {
+                match cs.connection.write(&req_send.data) {
                     Ok(len) if len < to_send => {
                         let left = to_send - len;
                         debug!("Sent {} of {}, leaving {}", len, to_send, left);
                         let pw = PendingWrite {
                             sent: len,
-                            context: msg.context,
-                            data: msg.data.clone(),
-                            reply_to: reply_to.clone()
+                            context: req_send.context,
+                            data: req_send.data.clone(),
+                            reply_to: reply_to.clone(),
                         };
                         cs.pending_writes.push_back(pw);
                         // No cfm here - we wait
@@ -662,46 +660,46 @@ impl TaskContext {
                     Ok(_) => {
                         debug!("Sent all {}", to_send);
                         let cfm = CfmSend {
-                            context: msg.context,
-                            handle: msg.handle,
+                            context: req_send.context,
+                            handle: req_send.handle,
                             result: Ok(to_send),
                         };
-                        reply_to.send_message(cfm);
+                        reply_to.send_nonrequest(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
                         let cfm = CfmSend {
-                            context: msg.context,
-                            handle: msg.handle,
+                            context: req_send.context,
+                            handle: req_send.handle,
                             result: Err(err.into()),
                         };
-                        reply_to.send_message(cfm);
+                        reply_to.send_nonrequest(cfm);
                     }
                 }
             }
         } else {
             let cfm = CfmSend {
                 result: Err(SocketError::BadHandle),
-                context: msg.context,
-                handle: msg.handle,
+                context: req_send.context,
+                handle: req_send.handle,
             };
-            reply_to.send_message(cfm);
+            reply_to.send_nonrequest(cfm);
         }
     }
 
     /// Handle responses
-    pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, msg: &SocketRsp) {
-        match *msg {
+    pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, rsp: &SocketRsp) {
+        match *rsp {
             SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
         }
     }
 
     /// Someone wants more data
-    fn handle_received(&mut self, event_loop: &mut TaskEventLoop, msg: &RspReceived) {
+    fn handle_received(&mut self, event_loop: &mut TaskEventLoop, rsp_received: &RspReceived) {
         let mut need_read = false;
         // Read response handle might not be valid - it might
         // have crossed over with a disconnect.
-        if let Some(cs) = self.connections.get_mut(&msg.handle) {
+        if let Some(cs) = self.connections.get_mut(&rsp_received.handle) {
             cs.outstanding = false;
             // Let's try and send them some - if if exhausts the
             // buffer on the socket, the event loop will automatically
@@ -710,7 +708,7 @@ impl TaskContext {
         }
         if need_read {
             // Try and read it - won't hurt if we can't.
-            self.read(event_loop, msg.handle)
+            self.read(event_loop, rsp_received.handle)
         }
     }
 }
@@ -723,7 +721,7 @@ impl Drop for ConnectedSocket {
                 context: pw.context,
                 result: Err(SocketError::Dropped),
             };
-            pw.reply_to.send_message(cfm);
+            pw.reply_to.send_nonrequest(cfm);
         }
     }
 }

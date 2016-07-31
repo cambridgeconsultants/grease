@@ -72,7 +72,6 @@ fn main() {
         let bind_req = http::ReqBind {
             context: 1,
             addr: "0.0.0.0:8000".parse().unwrap(),
-            ind_to: tx.clone(),
         };
         http_thread.send_request(bind_req, &tx);
         debug!("Got cfm for 8000 HTTP bind: {:?}", rx.recv().unwrap());
@@ -97,7 +96,7 @@ fn main() {
                 socket::SocketInd::Received(ref ind_rcv))) = ind {
             info!("Got {} bytes of input", ind_rcv.data.len());
             let recv_rsp = socket::RspReceived { handle: ind_rcv.handle };
-            socket_thread.send_message(recv_rsp);
+            socket_thread.send_nonrequest(recv_rsp);
             let reply_data = ind_rcv.data.clone();
             let send_req = socket::ReqSend { handle: ind_rcv.handle, data: reply_data, context: n };
             socket_thread.send_request(send_req, &tx);

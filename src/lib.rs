@@ -5,22 +5,39 @@
 //! For an high level overview to cuslip, see the project's README.md file.
 //!
 //! cuslip is a message-passing system, and messages are passed between tasks.
-//! Each task should be in its own module, and it should implement some sort
-//! of init function which calls `cuslip::make_task`.
+//! Tasks receive messages and act on them - be that, sending an immediate reply
+//! or communicating with a task lower down (or some other subsystem) before
+//! replying. Typically, tasks will implement a Finite State Machine (FSM) to
+//! control their actions.
 //!
-//! `main_loop` is a function which calls `recv()` on the given receiver object and
-//! performs the appropriate action when a message is received.
+//! Each task should be in its own module, and it should implement some sort
+//! of init function which calls `cuslip::make_task`, passing in a function
+//! which forms the tasks main loop.
+//!
+//! This main loop should repeatedly call the blocking `recv()` method on the
+//! given receiver object and perform the appropriate action when a message
+//! is received.
 //!
 //! ## Messages
 //!
 //! Messages in cuslip are boxed Structs, wrapped inside a nested enum which
 //! identifies which Struct they are. This allows them to be passed through a
-//! `std::sync::mpsc::Channel`. The Box ensures the messages are all small,
-//! as opposed to all being the size of the largest message.
+//! `std::sync::mpsc::Channel`, which is the message passing system underneath
+//! cuslip. The Box ensures the messages are all small, as opposed to all
+//! being the size of the largest message. The `Channel` is wrapped in a
+//! `MessageSender` object, which you keep, and pass around copies created
+//! with `clone()`.
 //!
-//! The wrapping is handled semi-automatically. I might macro this in future.
+//! If task A uses task B, then task A's init function should receive a copy
+//! of task B's `MessageSender` object. When task A sends a message to task B,
+//! task A puts its own `MessageSender` in the Request, so that task B knows
+//! where to send the Confirmation to. In some cases, it is appropriate for task B
+//! to retain a copy of the `MessageSender` so that indications can be sent at
+//! a later date. It is not recommended for task B to receive task A's `MessageSender`
+//! other than in a Request (for example, do not pass it in an init function), to
+//! avoid un-necessary coupling.
 //!
-//! See the `socket` module for an example,
+//! See the `http` module for an example - it uses the `socket` module.
 //!
 //! ## Usage
 //!
@@ -30,6 +47,10 @@
 //! use cuslip::prelude::*;
 //! use cuslip;
 //! ```
+//!
+//! You will also need to modify the `Message` enum (and its nested enums within)
+//! to encompass any modules you have written. They cannot currently be registered
+//! dynamically.
 
 #![allow(dead_code)]
 
@@ -205,33 +226,63 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
     return (MessageSender(tx), MessageReceiver(rx));
 }
 
+/// This dumps messages to the logger when they are dropped (i.e. once they have been handled).
+/// This means the log should be entirely sufficient to determine what the system has done, which
+/// is invaluable for debugging purposes.
+///
+/// In a future version, this logging might be in binary format over some sort of socket.
 impl Drop for Message {
     fn drop(&mut self) {
         debug!("** Destroyed {:?}", self);
     }
 }
 
+/// This wraps up an mpsc::Sender, performing a bit of repetitive code
+/// required to Box up `RequestSendable` and `NonRequestSendable` messages and
+/// wrap them in a covering `Message` enum.
 impl MessageSender {
+    /// Used for sending requests to a task. The `reply_to` value is a separate argument
+    /// because it is mandatory. It would be an error to send a request without indicating
+    /// where the matching confirmation should be sent.
     pub fn send_request<T: RequestSendable>(&self, msg: T, reply_to: &MessageSender) {
         self.0.send(msg.wrap(reply_to)).unwrap();
     }
 
-    pub fn send_message<T: NonRequestSendable>(&self, msg: T) {
+    /// Used for sending confirmations, indications and responses to a task.
+    /// There is no `reply_to` argument because these messages do not usually
+    /// ellicit a response. The exception is that some Indications do ellicit
+    /// a Response, but where this is the case, the receiving task will
+    /// already know where the `Indication` came from as it must have first sent
+    /// a `Request` to trigger the `Indication` in the first place.
+    pub fn send_nonrequest<T: NonRequestSendable>(&self, msg: T) {
         self.0.send(msg.wrap()).unwrap();
     }
 
+    /// Used for sending wrapped `Message` objects. Not often required - use
+    /// `send_request` and `send_nonrequest` in preference.
     pub fn send(&self, msg: Message) {
         self.0.send(msg).unwrap()
     }
 
+    /// Creates a clone of this MessageSender. The clone can then be kept
+    /// for sending messages at a later date, without consuming the original.
     pub fn clone(&self) -> MessageSender {
         MessageSender(self.0.clone())
     }
 }
 
+/// This wraps up an mpsc::Sender, performing a bit of repetitive boilerplate code.
 impl MessageReceiver {
-    pub fn recv(&self) -> Result<Message, std::sync::mpsc::RecvError> {
+
+    /// Useful for test code, but a task implementation should call `iter` in preference.
+    pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
         self.0.recv()
+    }
+
+    /// Allows the caller to repeatedly block on new messages.
+    /// Iteration ends when channel is destroyed (usually on system shutdown).
+    pub fn iter(&self) -> mpsc::Iter<Message> {
+        self.0.iter()
     }
 }
 
