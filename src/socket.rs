@@ -234,7 +234,7 @@ type TaskEventLoop = EventLoop<TaskContext>;
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
     handle: ListenHandle,
-    reply_to: ::MessageSender,
+    ind_to: ::MessageSender,
     listener: mio::tcp::TcpListener,
 }
 
@@ -243,12 +243,13 @@ struct PendingWrite {
     context: ::Context,
     sent: usize,
     data: Vec<u8>,
+    reply_to: ::MessageSender
 }
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
     parent: ListenHandle,
-    reply_to: ::MessageSender,
+    ind_to: ::MessageSender,
     handle: ConnectedHandle,
     connection: mio::tcp::TcpStream,
     /// There's a read the user hasn't process yet
@@ -430,7 +431,7 @@ impl TaskContext {
             let cs = ConnectedSocket {
                 parent: ls.handle,
                 handle: self.next_open,
-                reply_to: ls.reply_to.clone(),
+                ind_to: ls.ind_to.clone(),
                 connection: conn_addr.0,
                 outstanding: false,
                 pending_writes: VecDeque::new(),
@@ -449,7 +450,7 @@ impl TaskContext {
                         peer: conn_addr.1,
                     };
                     self.connections.insert(cs.handle, cs);
-                    ls.reply_to.send_message(msg);
+                    ls.ind_to.send_message(msg);
                 }
                 Err(err) => warn!("Fumbled incoming connection: {}", err),
             }
@@ -481,7 +482,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Ok(to_send),
                         };
-                        cs.reply_to.send_message(cfm);
+                        pw.reply_to.send_message(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -490,7 +491,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Err(err.into()),
                         };
-                        cs.reply_to.send_message(cfm);
+                        pw.reply_to.send_message(cfm);
                         break;
                     }
                 }
@@ -519,7 +520,7 @@ impl TaskContext {
                         data: buffer,
                     };
                     cs.outstanding = true;
-                    cs.reply_to.send_message(ind);
+                    cs.ind_to.send_message(ind);
                 }
                 Err(_) => {}
             }
@@ -532,7 +533,7 @@ impl TaskContext {
         {
             let cs = self.connections.get(&cs_handle).unwrap();
             let msg = IndDropped { handle: cs_handle };
-            cs.reply_to.send_message(msg);
+            cs.ind_to.send_message(msg);
         }
         self.connections.remove(&cs_handle);
     }
@@ -574,7 +575,7 @@ impl TaskContext {
                 debug!("Allocated listen handle {}", h);
                 let l = ListenSocket {
                     handle: h,
-                    reply_to: reply_to.clone(),
+                    ind_to: reply_to.clone(),
                     listener: server,
                 };
                 match event_loop.register(&l.listener,
@@ -640,6 +641,7 @@ impl TaskContext {
                     sent: 0,
                     context: msg.context,
                     data: msg.data.clone(),
+                    reply_to: reply_to.clone()
                 };
                 cs.pending_writes.push_back(pw);
                 // No cfm here - we wait
@@ -652,6 +654,7 @@ impl TaskContext {
                             sent: len,
                             context: msg.context,
                             data: msg.data.clone(),
+                            reply_to: reply_to.clone()
                         };
                         cs.pending_writes.push_back(pw);
                         // No cfm here - we wait
@@ -663,7 +666,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Ok(to_send),
                         };
-                        cs.reply_to.send_message(cfm);
+                        reply_to.send_message(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -672,7 +675,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Err(err.into()),
                         };
-                        cs.reply_to.send_message(cfm);
+                        reply_to.send_message(cfm);
                     }
                 }
             }
@@ -720,7 +723,7 @@ impl Drop for ConnectedSocket {
                 context: pw.context,
                 result: Err(SocketError::Dropped),
             };
-            self.reply_to.send_message(cfm);
+            pw.reply_to.send_message(cfm);
         }
     }
 }

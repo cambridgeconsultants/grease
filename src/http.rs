@@ -213,18 +213,13 @@ pub enum HttpError {
 //
 // ****************************************************************************
 
-struct ReplyContext {
-    pub reply_to: ::MessageSender,
-    pub context: ::Context,
-}
-
 struct HttpServer {
     /// Supplied in a `socket::CfmBind`
     pub listen_handle: Option<socket::ListenHandle>,
     /// For reference, which socket address this is on
     pub addr: net::SocketAddr,
     /// To whom we need to acknowledge the bind/unbind
-    pub reply_ctx: Option<ReplyContext>,
+    pub reply_ctx: Option<::ReplyContext>,
     /// The handle by which the upper layer refers to us
     pub our_handle: ServerHandle,
     /// Who to tell about the new connections we get
@@ -396,7 +391,7 @@ impl TaskContext {
     }
 
     fn handle_bind(&mut self, msg: &ReqBind, reply_to: &::MessageSender) {
-        let reply_ctx = ReplyContext {
+        let reply_ctx = ::ReplyContext {
             context: msg.context,
             reply_to: reply_to.clone(),
         };

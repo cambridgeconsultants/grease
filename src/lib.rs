@@ -71,6 +71,15 @@ pub struct MessageReceiver(mpsc::Receiver<Message>);
 /// below, it's easy to work out which T it corresponds to.
 pub type Context = usize;
 
+/// When handling a request, the process may take some time. As the request
+/// must be destroyed as soon as it arrives (for logging purposes), the
+/// essential details are recorded so that a Confirmation can be sent at a
+/// later date.
+pub struct ReplyContext {
+    pub reply_to: ::MessageSender,
+    pub context: ::Context,
+}
+
 /// A message is the fundametal unit we pass between tasks.
 /// All messages have a body, but requests also have an mpsc Channel
 /// object that the matching confirmation should be sent to.
