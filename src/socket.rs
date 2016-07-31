@@ -449,7 +449,7 @@ impl TaskContext {
                         peer: conn_addr.1,
                     };
                     self.connections.insert(cs.handle, cs);
-                    ls.reply_to.send(msg.wrap()).unwrap();
+                    ls.reply_to.send_message(msg);
                 }
                 Err(err) => warn!("Fumbled incoming connection: {}", err),
             }
@@ -481,7 +481,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Ok(to_send),
                         };
-                        cs.reply_to.send(cfm.wrap()).unwrap();
+                        cs.reply_to.send_message(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -490,7 +490,7 @@ impl TaskContext {
                             context: pw.context,
                             result: Err(err.into()),
                         };
-                        cs.reply_to.send(cfm.wrap()).unwrap();
+                        cs.reply_to.send_message(cfm);
                         break;
                     }
                 }
@@ -519,7 +519,7 @@ impl TaskContext {
                         data: buffer,
                     };
                     cs.outstanding = true;
-                    cs.reply_to.send(ind.wrap()).unwrap();
+                    cs.reply_to.send_message(ind);
                 }
                 Err(_) => {}
             }
@@ -532,7 +532,7 @@ impl TaskContext {
         {
             let cs = self.connections.get(&cs_handle).unwrap();
             let msg = IndDropped { handle: cs_handle };
-            cs.reply_to.send(msg.wrap()).unwrap();
+            cs.reply_to.send_message(msg);
         }
         self.connections.remove(&cs_handle);
     }
@@ -542,7 +542,7 @@ impl TaskContext {
         match *msg {
             ::GenericReq::Ping(ref x) => {
                 let cfm = ::PingCfm { context: x.context };
-                reply_to.send(cfm.wrap()).unwrap();
+                reply_to.send_message(cfm);
             }
         }
     }
@@ -603,7 +603,7 @@ impl TaskContext {
                 }
             }
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     /// Handle a ReqUnbind.
@@ -616,7 +616,7 @@ impl TaskContext {
             handle: msg.handle,
             context: msg.context,
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     /// Handle a ReqClose
@@ -626,7 +626,7 @@ impl TaskContext {
             handle: msg.handle,
             context: msg.context,
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     /// Handle a ReqSend
@@ -663,7 +663,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Ok(to_send),
                         };
-                        cs.reply_to.send(cfm.wrap()).unwrap();
+                        cs.reply_to.send_message(cfm);
                     }
                     Err(err) => {
                         warn!("Send error: {}", err);
@@ -672,7 +672,7 @@ impl TaskContext {
                             handle: msg.handle,
                             result: Err(err.into()),
                         };
-                        cs.reply_to.send(cfm.wrap()).unwrap();
+                        cs.reply_to.send_message(cfm);
                     }
                 }
             }
@@ -682,7 +682,7 @@ impl TaskContext {
                 context: msg.context,
                 handle: msg.handle,
             };
-            reply_to.send(cfm.wrap()).unwrap();
+            reply_to.send_message(cfm);
         }
     }
 
@@ -720,14 +720,13 @@ impl Drop for ConnectedSocket {
                 context: pw.context,
                 result: Err(SocketError::Dropped),
             };
-            self.reply_to.send(cfm.wrap()).unwrap();
+            self.reply_to.send_message(cfm);
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use ::prelude::*;
     use std::thread;
     use std::time;
 
@@ -737,7 +736,7 @@ mod test {
         let (reply_to, test_rx) = ::make_channel();
         let ping_req = ::PingReq { context: 1234 };
         thread::sleep(time::Duration::new(5, 0));
-        socket_thread.send(ping_req.wrap(&reply_to)).unwrap();
+        socket_thread.send_request(ping_req, &reply_to);
         let cfm = test_rx.recv().unwrap();
         match cfm {
             ::Message::Confirmation(::Confirmation::Generic(::GenericCfm::Ping(ref x))) => {

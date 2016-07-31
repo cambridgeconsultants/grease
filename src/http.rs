@@ -358,14 +358,14 @@ impl TaskContext {
                             context: reply_ctx.context,
                             result: Ok(server.our_handle),
                         };
-                        reply_ctx.reply_to.send(cfm.wrap()).unwrap();
+                        reply_ctx.reply_to.send_message(cfm);
                     }
                     Err(ref err) => {
                         let cfm = CfmBind {
                             context: reply_ctx.context,
                             result: Err(HttpError::SocketError(*err)),
                         };
-                        reply_ctx.reply_to.send(cfm.wrap()).unwrap();
+                        reply_ctx.reply_to.send_message(cfm);
                     }
                 }
             } else {
@@ -412,7 +412,7 @@ impl TaskContext {
             addr: msg.addr,
             context: server.our_handle,
         };
-        self.socket.send(req.wrap(&self.reply_to)).unwrap();
+        self.socket.send_request(req, &self.reply_to);
         self.servers.insert(server.our_handle, server);
     }
 
@@ -423,7 +423,7 @@ impl TaskContext {
             handle: msg.handle,
             result: Err(HttpError::Unknown),
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     fn handle_responsebody(&mut self, msg: &ReqResponseBody, reply_to: &::MessageSender) {
@@ -433,7 +433,7 @@ impl TaskContext {
             handle: msg.handle,
             result: Err(HttpError::Unknown),
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     fn handle_responseclose(&mut self, msg: &ReqResponseClose, reply_to: &::MessageSender) {
@@ -443,14 +443,14 @@ impl TaskContext {
             handle: msg.handle,
             result: Err(HttpError::Unknown),
         };
-        reply_to.send(cfm.wrap()).unwrap();
+        reply_to.send_message(cfm);
     }
 
     fn handle_generic_req(&mut self, msg: &::GenericReq, reply_to: &::MessageSender) {
         match *msg {
             ::GenericReq::Ping(ref x) => {
                 let cfm = ::PingCfm { context: x.context };
-                reply_to.send(cfm.wrap()).unwrap();
+                reply_to.send_message(cfm);
             }
         }
     }

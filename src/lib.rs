@@ -59,10 +59,12 @@ use std::thread;
 // ****************************************************************************
 
 /// We use this for sending messages into a task
-pub type MessageSender = mpsc::Sender<Message>;
+#[derive(Debug)]
+pub struct MessageSender(mpsc::Sender<Message>);
 
 /// A task uses this internally for pending on received messages
-pub type MessageReceiver = mpsc::Receiver<Message>;
+#[derive(Debug)]
+pub struct MessageReceiver(mpsc::Receiver<Message>);
 
 /// A type used to passing context between layers. If each layer maintains
 /// a HashMap<Context, T>, when a confirmation comes back from the layer
@@ -191,12 +193,36 @@ pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
 /// Helper function to create an mpsc channel pair.
 pub fn make_channel() -> (MessageSender, MessageReceiver) {
     let (tx, rx) = mpsc::channel::<Message>();
-    return (tx, rx);
+    return (MessageSender(tx), MessageReceiver(rx));
 }
 
 impl Drop for Message {
     fn drop(&mut self) {
         debug!("** Destroyed {:?}", self);
+    }
+}
+
+impl MessageSender {
+    pub fn send_request<T: RequestSendable>(&self, msg: T, reply_to: &MessageSender) {
+        self.0.send(msg.wrap(reply_to)).unwrap();
+    }
+
+    pub fn send_message<T: NonRequestSendable>(&self, msg: T) {
+        self.0.send(msg.wrap()).unwrap();
+    }
+
+    pub fn send(&self, msg: Message) {
+        self.0.send(msg).unwrap()
+    }
+
+    pub fn clone(&self) -> MessageSender {
+        MessageSender(self.0.clone())
+    }
+}
+
+impl MessageReceiver {
+    pub fn recv(&self) -> Result<Message, std::sync::mpsc::RecvError> {
+        self.0.recv()
     }
 }
 
@@ -223,13 +249,11 @@ impl NonRequestSendable for PingCfm {
 
 #[cfg(test)]
 mod tests {
-    use ::prelude::*;
-
     #[test]
     fn test_make_channel() {
         let (tx, rx) = ::make_channel();
         let test_req = ::PingReq { context: 1234 };
-        tx.send(test_req.wrap(&tx)).unwrap();
+        tx.send_request(test_req, &tx);
         let msg = rx.recv();
         println!("Got {:?}", msg);
         let msg = msg.unwrap();
