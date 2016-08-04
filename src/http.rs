@@ -100,6 +100,8 @@ pub struct ReqBind {
     pub context: ::Context,
 }
 
+make_request!(ReqBind, ::Request::Http, HttpReq::Bind);
+
 /// Send the headers for an HTTP response. Host, Content-Length
 /// and Content-Type are automatically added from the relevant fields
 /// but you can add arbitrary other headers in the header vector.
@@ -118,6 +120,9 @@ pub struct ReqResponseStart {
     pub headers: HashMap<String, String>,
 }
 
+make_request!(ReqResponseStart, ::Request::Http, HttpReq::ResponseStart);
+
+
 /// Send some body content for an HTTP response. Must be proceeded
 /// by ReqResponseStart to send the headers.
 #[derive(Debug)]
@@ -128,6 +133,8 @@ pub struct ReqResponseBody {
     pub context: ::Context,
 }
 
+make_request!(ReqResponseBody, ::Request::Http, HttpReq::ResponseBody);
+
 /// Close out an HTTP response
 #[derive(Debug)]
 pub struct ReqResponseClose {
@@ -135,12 +142,16 @@ pub struct ReqResponseClose {
     pub context: ::Context,
 }
 
+make_request!(ReqResponseClose, ::Request::Http, HttpReq::ResponseClose);
+
 /// Whether the ReqBind was successfull
 #[derive(Debug)]
 pub struct CfmBind {
     pub context: ::Context,
     pub result: Result<ServerHandle, HttpError>,
 }
+
+make_confirmation!(CfmBind, ::Confirmation::Http, HttpCfm::Bind);
 
 /// Whether the ReqResponseStart was successfull
 #[derive(Debug)]
@@ -150,6 +161,10 @@ pub struct CfmResponseStart {
     pub result: Result<(), HttpError>,
 }
 
+make_confirmation!(CfmResponseStart,
+                   ::Confirmation::Http,
+                   HttpCfm::ResponseStart);
+
 /// Confirms a ReqResponseBody has been sent
 #[derive(Debug)]
 pub struct CfmResponseBody {
@@ -158,6 +173,8 @@ pub struct CfmResponseBody {
     pub result: Result<(), HttpError>,
 }
 
+make_confirmation!(CfmResponseBody, ::Confirmation::Http, HttpCfm::ResponseBody);
+
 /// Confirms the connection has been closed
 #[derive(Debug)]
 pub struct CfmResponseClose {
@@ -165,6 +182,10 @@ pub struct CfmResponseClose {
     pub context: ::Context,
     pub result: Result<(), HttpError>,
 }
+
+make_confirmation!(CfmResponseClose,
+                   ::Confirmation::Http,
+                   HttpCfm::ResponseClose);
 
 /// A new HTTP request has been received
 #[derive(Debug)]
@@ -176,11 +197,15 @@ pub struct IndConnected {
     pub headers: HashMap<String, String>,
 }
 
+make_indication!(IndConnected, ::Indication::Http, HttpInd::Connected);
+
 /// An HTTP connection has been dropped
 #[derive(Debug)]
 pub struct IndClosed {
     pub handle: ConnectionHandle,
 }
+
+make_indication!(IndClosed, ::Indication::Http, HttpInd::Closed);
 
 // ****************************************************************************
 //
@@ -500,80 +525,6 @@ impl TaskContext {
                 reply_to.send_nonrequest(cfm);
             }
         }
-    }
-}
-
-/// ReqBind is sendable over a channel
-impl RequestSendable for ReqBind {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Http(HttpReq::Bind(Box::new(self))))
-    }
-}
-
-/// ReqResponseStart is sendable over a channel
-impl RequestSendable for ReqResponseStart {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Http(HttpReq::ResponseStart(Box::new(self))))
-    }
-}
-
-/// ReqResponseBody is sendable over a channel
-impl RequestSendable for ReqResponseBody {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Http(HttpReq::ResponseBody(Box::new(self))))
-    }
-}
-
-/// ReqResponseClose is sendable over a channel
-impl RequestSendable for ReqResponseClose {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Http(HttpReq::ResponseClose(Box::new(self))))
-    }
-}
-
-/// CfmBind is sendable over a channel
-impl NonRequestSendable for CfmBind {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Http(HttpCfm::Bind(Box::new(self))))
-    }
-}
-
-/// CfmResponseStart is sendable over a channel
-impl NonRequestSendable for CfmResponseStart {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Http(HttpCfm::ResponseStart(Box::new(self))))
-    }
-}
-
-/// CfmResponseBody is sendable over a channel
-impl NonRequestSendable for CfmResponseBody {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Http(HttpCfm::ResponseBody(Box::new(self))))
-    }
-}
-
-/// CfmResponseClose is sendable over a channel
-impl NonRequestSendable for CfmResponseClose {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Http(HttpCfm::ResponseClose(Box::new(self))))
-    }
-}
-
-/// IndConnected is sendable over a channel
-impl NonRequestSendable for IndConnected {
-    fn wrap(self) -> ::Message {
-        ::Message::Indication(::Indication::Http(HttpInd::Connected(Box::new(self))))
-    }
-}
-
-/// IndClosed is sendable over a channel
-impl NonRequestSendable for IndClosed {
-    fn wrap(self) -> ::Message {
-        ::Message::Indication(::Indication::Http(HttpInd::Closed(Box::new(self))))
     }
 }
 

@@ -88,6 +88,8 @@ pub struct ReqBind {
     pub context: ::Context,
 }
 
+make_request!(ReqBind, ::Request::Socket, SocketReq::Bind);
+
 /// Unbind a bound listen socket
 #[derive(Debug)]
 pub struct ReqUnbind {
@@ -97,6 +99,8 @@ pub struct ReqUnbind {
     pub context: ::Context,
 }
 
+make_request!(ReqUnbind, ::Request::Socket, SocketReq::Unbind);
+
 /// Close an open connection
 #[derive(Debug)]
 pub struct ReqClose {
@@ -105,6 +109,8 @@ pub struct ReqClose {
     /// Reflected in the cfm
     pub context: ::Context,
 }
+
+make_request!(ReqClose, ::Request::Socket, SocketReq::Close);
 
 /// Send something on a connection
 pub struct ReqSend {
@@ -116,6 +122,8 @@ pub struct ReqSend {
     pub data: Vec<u8>,
 }
 
+make_request!(ReqSend, ::Request::Socket, SocketReq::Send);
+
 /// Reply to a ReqBind.
 #[derive(Debug)]
 pub struct CfmBind {
@@ -124,6 +132,8 @@ pub struct CfmBind {
     /// Reflected from the req
     pub context: ::Context,
 }
+
+make_confirmation!(CfmBind, ::Confirmation::Socket, SocketCfm::Bind);
 
 /// Reply to a ReqUnbind.
 #[derive(Debug)]
@@ -135,6 +145,8 @@ pub struct CfmUnbind {
     /// Reflected from the req
     pub context: ::Context,
 }
+
+make_confirmation!(CfmUnbind, ::Confirmation::Socket, SocketCfm::Unbind);
 
 /// Reply to a ReqClose. Will flush out all
 /// existing data.
@@ -148,6 +160,8 @@ pub struct CfmClose {
     pub context: ::Context,
 }
 
+make_confirmation!(CfmClose, ::Confirmation::Socket, SocketCfm::Close);
+
 /// Reply to a ReqSend. The data has not necessarily
 /// been sent, but it is safe to send some more data.
 #[derive(Debug)]
@@ -160,6 +174,8 @@ pub struct CfmSend {
     pub context: ::Context,
 }
 
+make_confirmation!(CfmSend, ::Confirmation::Socket, SocketCfm::Send);
+
 /// Indicates that a listening socket has been connected to.
 #[derive(Debug)]
 pub struct IndConnected {
@@ -171,12 +187,16 @@ pub struct IndConnected {
     pub peer: net::SocketAddr,
 }
 
+make_indication!(IndConnected, ::Indication::Socket, SocketInd::Connected);
+
 /// Indicates that a socket has been dropped.
 #[derive(Debug)]
 pub struct IndDropped {
     /// The handle that is no longer valid
     pub handle: ConnectedHandle,
 }
+
+make_indication!(IndDropped, ::Indication::Socket, SocketInd::Dropped);
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
@@ -190,12 +210,16 @@ pub struct IndReceived {
     pub data: Vec<u8>,
 }
 
+make_indication!(IndReceived, ::Indication::Socket, SocketInd::Received);
+
 /// Tell the task that more data can now be sent.
 #[derive(Debug)]
 pub struct RspReceived {
     /// Which handle is now free to send up more data
     pub handle: ConnectedHandle,
 }
+
+make_response!(RspReceived, ::Response::Socket, SocketRsp::Received);
 
 // ****************************************************************************
 //
@@ -751,94 +775,6 @@ mod test {
             }
             _ => panic!("Bad match"),
         }
-    }
-}
-
-/// ReqBind is sendable over a channel
-impl RequestSendable for ReqBind {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Socket(SocketReq::Bind(Box::new(self))))
-    }
-}
-
-/// ReqUnbind is sendable over a channel
-impl RequestSendable for ReqUnbind {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Socket(SocketReq::Unbind(Box::new(self))))
-    }
-}
-
-/// ReqClose is sendable over a channel
-impl RequestSendable for ReqClose {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Socket(SocketReq::Close(Box::new(self))))
-    }
-}
-
-/// ReqSend is sendable over a channel
-impl RequestSendable for ReqSend {
-    fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-        ::Message::Request(reply_to.clone(),
-                           ::Request::Socket(SocketReq::Send(Box::new(self))))
-    }
-}
-
-/// CfmBind is sendable over a channel
-impl NonRequestSendable for CfmBind {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Socket(SocketCfm::Bind(Box::new(self))))
-    }
-}
-
-/// CfmUnbind is sendable over a channel
-impl NonRequestSendable for CfmUnbind {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Socket(SocketCfm::Unbind(Box::new(self))))
-    }
-}
-
-/// CfmClose is sendable over a channel
-impl NonRequestSendable for CfmClose {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Socket(SocketCfm::Close(Box::new(self))))
-    }
-}
-
-/// CfmSend is sendable over a channel
-impl NonRequestSendable for CfmSend {
-    fn wrap(self) -> ::Message {
-        ::Message::Confirmation(::Confirmation::Socket(SocketCfm::Send(Box::new(self))))
-    }
-}
-
-/// IndConnected is sendable over a channel
-impl NonRequestSendable for IndConnected {
-    fn wrap(self) -> ::Message {
-        ::Message::Indication(::Indication::Socket(SocketInd::Connected(Box::new(self))))
-    }
-}
-
-/// IndDropped is sendable over a channel
-impl NonRequestSendable for IndDropped {
-    fn wrap(self) -> ::Message {
-        ::Message::Indication(::Indication::Socket(SocketInd::Dropped(Box::new(self))))
-    }
-}
-
-/// IndReceived is sendable over a channel
-impl NonRequestSendable for IndReceived {
-    fn wrap(self) -> ::Message {
-        ::Message::Indication(::Indication::Socket(SocketInd::Received(Box::new(self))))
-    }
-}
-
-/// RspReceived is sendable over a channel
-impl NonRequestSendable for RspReceived {
-    fn wrap(self) -> ::Message {
-        ::Message::Response(::Response::Socket(SocketRsp::Received(Box::new(self))))
     }
 }
 

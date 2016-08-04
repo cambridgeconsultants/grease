@@ -52,7 +52,100 @@
 //! to encompass any modules you have written. They cannot currently be registered
 //! dynamically.
 
-#![allow(dead_code)]
+// ****************************************************************************
+//
+// Macros
+//
+// ****************************************************************************
+
+/// Implements RequestSendable on the given request structure.
+/// For example:
+///
+/// ```ignore
+/// make_request(ReqOpen, grease::Request::Foo, FooReq::Open)
+/// ```
+///
+/// Where `ReqOpen` is the name of a struct, `grease::Request::Foo` is the
+/// member of `grease::Request` representing the `Foo` module, and
+/// `FooReq::Open` is the member of the `FooReq` enum representing a `ReqOpen`
+/// message.
+#[macro_export]
+macro_rules! make_request(
+    ($v:ident, $s:path, $e:path) => {
+        impl RequestSendable for $v {
+            fn wrap(self, reply_to: &::MessageSender) -> ::Message {
+                ::Message::Request(reply_to.clone(),
+                                   $s($e(Box::new(self))))
+            }
+        }
+    }
+);
+
+/// Implements NonRequestSendable on the given confirmation structure.
+/// For example:
+///
+/// ```ignore
+/// make_confirmation(CfmOpen, grease::Confirmation::Foo, FooCfm::Open)
+/// ```
+///
+/// Where `CfmOpen` is the name of a struct, `grease::Confirmation::Foo` is
+/// the member of `grease::Confirmation` representing the `Foo` module, and
+/// `FooCfm::Open` is the member of the `FooCfm` enum representing a `CfmOpen`
+/// message.
+#[macro_export]
+macro_rules! make_confirmation(
+    ($v:ident, $s:path, $e:path) => {
+        impl NonRequestSendable for $v {
+            fn wrap(self) -> ::Message {
+                ::Message::Confirmation($s($e(Box::new(self))))
+            }
+        }
+    }
+);
+
+/// Implements NonRequestSendable on the given indication structure.
+/// For example:
+///
+/// ```ignore
+/// make_indication(IndConnected, grease::Indication::Foo, FooInd::Connected)
+/// ```
+///
+/// Where `IndConnected` is the name of a struct, `grease::Indication::Foo` is
+/// the member of the `grease::Indication` enum representing the `Foo` module,
+/// and `FooInd::Connected` is the member of the `FooInd` enum representing a
+/// `IndConnected` message.
+#[macro_export]
+macro_rules! make_indication(
+    ($v:ident, $s:path, $e:path) => {
+        impl NonRequestSendable for $v {
+            fn wrap(self) -> ::Message {
+                ::Message::Indication($s($e(Box::new(self))))
+            }
+        }
+    }
+);
+
+/// Implements NonRequestSendable on the given response structure.
+/// For example:
+///
+/// ```ignore
+/// make_response(RspConnected, grease::Response::Foo, FooRsp::Connected)
+/// ```
+///
+/// Where `RspConnected` is the name of a struct, `grease::Response::Foo` is the
+/// member of `grease::Response` representing the `Foo` module, and
+/// `FooRsp::Connected` is the member of the `FooRsp` enum representing a
+/// `RspConnected` message.
+#[macro_export]
+macro_rules! make_response(
+    ($v:ident, $s:path, $e:path) => {
+        impl NonRequestSendable for $v {
+            fn wrap(self) -> ::Message {
+                ::Message::Response($s($e(Box::new(self))))
+            }
+        }
+    }
+);
 
 // ****************************************************************************
 //
@@ -169,11 +262,15 @@ pub struct PingReq {
     context: Context,
 }
 
+make_request!(PingReq, ::Request::Generic, GenericReq::Ping);
+
 /// Reply to a PingReq, including the reflected context.
 #[derive(Debug)]
 pub struct PingCfm {
     context: Context,
 }
+
+make_confirmation!(PingCfm, ::Confirmation::Generic, GenericCfm::Ping);
 
 // ****************************************************************************
 //
@@ -291,21 +388,6 @@ impl MessageReceiver {
 // Private Functions
 //
 // ****************************************************************************
-
-/// PingReq is sendable over a channel
-impl RequestSendable for PingReq {
-    fn wrap(self, reply_to: &MessageSender) -> Message {
-        Message::Request(reply_to.clone(),
-                         Request::Generic(GenericReq::Ping(Box::new(self))))
-    }
-}
-
-/// PingCfm is sendable over a channel
-impl NonRequestSendable for PingCfm {
-    fn wrap(self) -> Message {
-        Message::Confirmation(Confirmation::Generic(GenericCfm::Ping(Box::new(self))))
-    }
-}
 
 #[cfg(test)]
 mod tests {
