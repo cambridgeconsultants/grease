@@ -12,30 +12,24 @@
 //!
 //! Each task should be in its own module, and it should implement some sort
 //! of init function which calls `grease::make_task`, passing in a function
-//! which forms the tasks main loop.
-//!
-//! This main loop should repeatedly call the blocking `recv()` method on the
-//! given receiver object and perform the appropriate action when a message
-//! is received.
+//! which forms the task's main loop.
 //!
 //! ## Messages
 //!
-//! Messages in grease are boxed Structs, wrapped inside a nested enum which
-//! identifies which Struct they are. This allows them to be passed through a
-//! `std::sync::mpsc::Channel`, which is the message passing system underneath
-//! grease. The Box ensures the messages are all small, as opposed to all
-//! being the size of the largest message. The `Channel` is wrapped in a
-//! `MessageSender` object, which you keep, and pass around copies created
-//! with `clone()`.
+//! Messages in grease are boxed structs, wrapped inside a nested enum which
+//! identifies which struct they are. This allows them to all be passed through
+//! a single `std::sync::mpsc::Channel`, which (wrapped in a `MessageSender`) is
+//! the message passing system underneath grease. The Box ensures the messages
+//! are all small, as opposed to all being the size of the largest message.
 //!
-//! If task A uses task B, then task A's init function should receive a copy
-//! of task B's `MessageSender` object. When task A sends a message to task B,
-//! task A puts its own `MessageSender` in the Request, so that task B knows
-//! where to send the Confirmation to. In some cases, it is appropriate for task B
-//! to retain a copy of the `MessageSender` so that indications can be sent at
-//! a later date. It is not recommended for task B to receive task A's `MessageSender`
-//! other than in a Request (for example, do not pass it in an init function), to
-//! avoid un-necessary coupling.
+//! If task A uses task B, then task A's init function should receive a copy of
+//! task B's `MessageSender` object. When task A sends a message to task B, task
+//! A puts its own `MessageSender` in the Request, so that task B knows where to
+//! send the Confirmation to. In some cases, it is appropriate for task B to
+//! retain a copy of the `MessageSender` so that indications can be sent at a
+//! later date. It is not recommended for task B to receive task A's
+//! `MessageSender` other than in a Request (for example, do not pass it in an
+//! init function), to avoid un-necessary coupling.
 //!
 //! See the `http` module for an example - it uses the `socket` module.
 //!
@@ -48,9 +42,32 @@
 //! use grease;
 //! ```
 //!
-//! You will also need to modify the `Message` enum (and its nested enums within)
-//! to encompass any modules you have written. They cannot currently be registered
-//! dynamically.
+//! You will also need to modify the `Message` enum (and its nested enums
+//! within) to encompass any modules you have written. They cannot currently be
+//! registered dynamically.
+//!
+//! ## Implementing a task
+//!
+//! The task's main loop function is given a `MessageReceiver`, and a
+//! `MessageSender`. The task should loop on the `MessageReceiver` object's
+//! ``iter()` method and perform the appropriate action when a message is
+//! received. The task should end when the iterator terminates. The
+//! `MessageSender` is probably not useful within the task itself (unless it
+//! wishes to send itself a message) but clones are usually passed to other
+//! tasks, so they know how to respond to this task.
+//!
+//! ```ignore
+//! use grease;
+//! ...
+//! grease::make_task("foo", main_loop);
+//! ...
+//! fn main_loop(rx: grease::MessageReceiver, tx: grease::MessageSender) {
+//!     let t = TaskContext::new(tx);
+//!     for msg in rx.iter() {
+//!         t.handle(msg);
+//!     }
+//! }
+//! ```
 
 // ****************************************************************************
 //
@@ -149,7 +166,7 @@ macro_rules! make_response(
 
 // ****************************************************************************
 //
-// Imports
+// Crates
 //
 // ****************************************************************************
 
@@ -159,9 +176,21 @@ extern crate mio;
 extern crate rushttp;
 extern crate multi_map;
 
+// ****************************************************************************
+//
+// Sub-modules
+//
+// ****************************************************************************
+
 pub mod socket;
 pub mod prelude;
 pub mod http;
+
+// ****************************************************************************
+//
+// Imports
+//
+// ****************************************************************************
 
 use ::prelude::*;
 use std::sync::mpsc;
@@ -195,9 +224,9 @@ pub struct ReplyContext {
     pub context: ::Context,
 }
 
-/// A message is the fundametal unit we pass between tasks.
-/// All messages have a body, but requests also have an mpsc Channel
-/// object that the matching confirmation should be sent to.
+/// A message is the fundamental unit we pass between tasks.
+/// All messages have a body, but requests also have an `MessageSender`
+/// object that should be used to send the confirmation in reply.
 #[derive(Debug)]
 pub enum Message {
     Request(MessageSender, Request),
@@ -207,8 +236,8 @@ pub enum Message {
 }
 
 /// The set of all requests in the system. This is an enumeration of all the
-/// services that can handle requests. The enum included within each service is probably
-/// defined in that service's module.
+/// services that can handle requests. The enum included within each service is
+/// probably defined in that service's module.
 #[derive(Debug)]
 pub enum Request {
     Generic(GenericReq),
@@ -217,8 +246,8 @@ pub enum Request {
 }
 
 /// The set of all confirmations in the system. This should look exactly like
-/// `Request` but with Cfm instead of Req. These are handled by tasks that
-/// send requests - you send a request and you get a confirm back.
+/// `Request` but as `CfmXXX` instead of `ReqXXX`. These are handled by tasks
+/// that send requests - you send a request and you get a confirmation back.
 #[derive(Debug)]
 pub enum Confirmation {
     Generic(GenericCfm),
@@ -249,25 +278,27 @@ pub enum GenericReq {
     Ping(Box<PingReq>),
 }
 
-/// There is exactly one GenericCfm for every GenericReq. These should be
-/// handled by every task that can ever send a GenericReq.
+/// There is exactly one `GenericCfm` for every `GenericReq`. These should be
+/// handled by every task that can ever send a `GenericReq`.
 #[derive(Debug)]
 pub enum GenericCfm {
     Ping(Box<PingCfm>),
 }
 
-/// A simple ping - generates a PingCfm with some reflected context.
+/// A simple ping - receiving task should send a `PingCfm` in reply
 #[derive(Debug)]
 pub struct PingReq {
-    context: Context,
+    /// This will be reflected in the `PingCfm` to aid message association
+    pub context: Context,
 }
 
 make_request!(PingReq, ::Request::Generic, GenericReq::Ping);
 
-/// Reply to a PingReq, including the reflected context.
+/// Reply to a `PingReq`
 #[derive(Debug)]
 pub struct PingCfm {
-    context: Context,
+    /// This is reflected from the `PingReq` to aid message association
+    pub context: Context,
 }
 
 make_confirmation!(PingCfm, ::Confirmation::Generic, GenericCfm::Ping);
@@ -294,7 +325,10 @@ make_confirmation!(PingCfm, ::Confirmation::Generic, GenericCfm::Ping);
 //
 // ****************************************************************************
 
-/// Helper function to create a new thread.
+/// Helper function to create a new task.
+///
+/// As tasks are supposed to live forever, we immediately detach the thread
+/// we create by dropping `JoinHandle` returned from `thread::spawn`.
 ///
 /// ```
 /// fn main_loop(rx: grease::MessageReceiver, _: grease::MessageSender) {
@@ -313,43 +347,51 @@ pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
     let (sender, receiver) = make_channel();
     let angle_name = format!("<{}>", name);
     let sender_clone = sender.clone();
-    let _ =
-        thread::Builder::new().name(angle_name).spawn(move || main_loop(receiver, sender_clone));
+    let tb = thread::Builder::new().name(angle_name);
+    let _handle = tb.spawn(move || main_loop(receiver, sender_clone));
     return sender;
 }
 
-/// Helper function to create an mpsc channel pair.
+/// Helper function to create a pair of objects for sending and receiving
+/// messages.
+///
+/// Think of them as two ends of a uni-directional pipe, but the sending end of
+/// the pipe can be cloned and given to other people, so they can also send
+/// things down it.
 pub fn make_channel() -> (MessageSender, MessageReceiver) {
     let (tx, rx) = mpsc::channel::<Message>();
     return (MessageSender(tx), MessageReceiver(rx));
 }
 
-/// This dumps messages to the logger when they are dropped (i.e. once they have been handled).
-/// This means the log should be entirely sufficient to determine what the system has done, which
-/// is invaluable for debugging purposes.
+
+/// This dumps messages to the logger when they are dropped (i.e. once they have
+/// been handled). This means the log should be entirely sufficient to determine
+/// what the system has done, which is invaluable for debugging purposes.
 ///
-/// In a future version, this logging might be in binary format over some sort of socket.
+/// In a future version, this logging might be in binary format over some sort
+/// of socket.
 impl Drop for Message {
     fn drop(&mut self) {
         debug!("** Destroyed {:?}", self);
     }
 }
 
-/// This wraps up an mpsc::Sender, performing a bit of repetitive code
-/// required to Box up `RequestSendable` and `NonRequestSendable` messages and
-/// wrap them in a covering `Message` enum.
+/// This is the 'receive' end of our message pipe. It wraps up an
+/// `mpsc::Sender`, performing a bit of repetitive code required to Box up
+/// `RequestSendable` and `NonRequestSendable` messages and wrap them in a
+/// covering `Message` enum.
 impl MessageSender {
-    /// Used for sending requests to a task. The `reply_to` value is a separate argument
-    /// because it is mandatory. It would be an error to send a request without indicating
-    /// where the matching confirmation should be sent.
+    /// Used for sending requests to a task. The `reply_to` value is a separate
+    /// argument because it is mandatory. It would be an error to send a request
+    /// without indicating where the matching confirmation should be sent.
     pub fn send_request<T: RequestSendable>(&self, msg: T, reply_to: &MessageSender) {
         self.0.send(msg.wrap(reply_to)).unwrap();
     }
 
     /// Used for sending confirmations, indications and responses to a task.
     /// There is no `reply_to` argument because these messages do not usually
-    /// ellicit a response. The exception is that some Indications do ellicit
-    /// a Response, but where this is the case, the receiving task will
+    /// generate a response. The exception is that some `Indication`s do generate
+    /// a `Response`, but where this is the case, the receiving task will
     /// already know where the `Indication` came from as it must have first sent
     /// a `Request` to trigger the `Indication` in the first place.
     pub fn send_nonrequest<T: NonRequestSendable>(&self, msg: T) {
@@ -369,9 +411,11 @@ impl MessageSender {
     }
 }
 
-/// This wraps up an mpsc::Sender, performing a bit of repetitive boilerplate code.
+/// This is the 'output' end of our message pipe. It wraps up an
+/// `mpsc::Sender`, performing a bit of repetitive boilerplate code.
 impl MessageReceiver {
-    /// Useful for test code, but a task implementation should call `iter` in preference.
+    /// Useful for test code, but a task implementation should call `iter` in
+    /// preference.
     pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
         self.0.recv()
     }

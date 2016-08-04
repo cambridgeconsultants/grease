@@ -1,4 +1,4 @@
-//! # grease Sockets
+//! # socket - A TCP server task
 //!
 //! The grease socket task makes handling sockets easier. A user requests the
 //! socket task opens a new socket and it does so (if possible). The user then

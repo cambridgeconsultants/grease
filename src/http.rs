@@ -1,40 +1,37 @@
-//! # http - The HTTP service
+//! # http - An HTTP parsing/rendering task
 //!
-//! This service depends on socket for the socket-y stuff, and
-//! it uses the rushttp library to handle the HTTP parsing. The layer
-//! above is responsible for working out what to do with the requests. This
-//! layer will accept anything - OPTION, HEAD, GET, POST, etc - on any URL and
-//! pass it on up. Consider this as a basic octet-to-IndConnected parser, and
-//! a basic ReqResponseX-to-octet renderer. It's not a fully fledged webserver
-//! by itself. The only thing we validate is the Host: header, so we know
-//! which upper layer to pass the IndConnected on to.
+//! This task implements a basic HTTP parser/renderer. It depends on the
+//! `socket` task to interface with the network, and passes up decoded HTTP
+//! requests. In reply, it receives requests to send the HTTP response.
+//!
+//! The layer above is responsible for working out what to do with the HTTP
+//! requests. This layer will accept anything - OPTION, HEAD, GET, POST, etc -
+//! on any URL and pass it on up. It is an HTTP request parser and HTTP
+//! response renderer as opposed to a fully fledged web-server, but it might
+//! be useful it you wanted to implement a web server.
+//!
+//! When a `ReqBind` is received, it attempts to bind a new socket with the
+//! socket task. If that succeeds, a new HttpServer object is created.
+//!
+//! When an `IndConnected` is received from the socket task, we create a new
+//! `HttpConnection` object, which contains a parser (amongst other things).
+//! When data is received on the socket, it's passed to the parser and then we
+//! respond to the socket task to unblock the socket and allow more data in.
+//! Once the parser is satisfied, we can check the decoded HTTP request against our
+//! registered HttpServer objects and pass up an `IndConnected` if appropriate
+//! (or reject the request with an HTTP error response if we don't like it).
+//!
+//! After an `IndRequest` has been sent up, an `IndClosed` will be sent when
+//! the connection subsequently closes (perhaps prematurely). The user of the
+//! service should follow an `IndConnected` with a `ReqResponseStart`, zero or
+//! more `ReqResponseBody` and then a `ReqResponseClose`. For flow control it
+//! is recommended that the user waits for the `CfmResponseBody` before
+//! sending another `ReqResponseBody`. Although the socket task underneath
+//! should buffer all the data anyway, using flow control properly saves
+//! memory - especially when sending large bodies.
 //!
 //! TODO: We need to support an IndBody / RspBody at some point, so that
 //! POST and PUT will actually work.
-//!
-//! Once an http server has been bound using `ReqBind`, when an http request
-//! has been seen, an `IndRequest` will be sent up containing the relevant headers.
-//! An `IndClosed` will be sent when the connection subsequently closes. The
-//! user of the service should follow an IndRequest with a ReqResponseStart,
-//! zero or more ReqResponseBody and then a ReqResponseClose. For flow control
-//! it is recommended that the user waits for the CfmResponseBody before sending
-//! another ReqResponseBody. Although the socket task underneath should buffer
-//! all the data anyway, using flow control properly saves memory - especially
-//! when sending large bodies.
-//!
-//! When an HTTP server is bound, we check our current bindings. If we are
-//! not currently bound on that port, we bind it. Either way, we create a new
-//! HttpServer object.
-//!
-//! When a new connection is received from the socket task, we create a new
-//! HttpConnection object, which contains an HttpRequest parser object. When
-//! data is received on the socket, it's passed to the parser and then we
-//! respond to the indication to unblock the socket and allow more data in.
-//! Once the parser returns something other than `ParseResult::InProgress`
-//! we can check the request against our registered HttpServer objects
-//! and pass up an IndConnected if appropriate (or reject the request with
-//! an error if we don't like it).
-
 
 // ****************************************************************************
 //
