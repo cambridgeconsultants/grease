@@ -17,6 +17,8 @@
 
 use super::{Message, MessageSender};
 
+pub use super::GenericProvider;
+
 // ****************************************************************************
 //
 // Public Types

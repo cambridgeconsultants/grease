@@ -303,6 +303,18 @@ pub struct PingCfm {
 
 make_confirmation!(PingCfm, ::Confirmation::Generic, GenericCfm::Ping);
 
+/// Should be implemented by tasks which handle GenericReq
+pub trait GenericProvider {
+    fn handle_generic_req(&mut self, req: &GenericReq, reply_to: &MessageSender) {
+        match *req {
+            GenericReq::Ping(ref x) => {
+                let cfm = PingCfm { context: x.context };
+                reply_to.send_nonrequest(cfm);
+            }
+        }
+    }
+}
+
 // ****************************************************************************
 //
 // Private Types
