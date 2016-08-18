@@ -15,9 +15,7 @@
 //
 // ****************************************************************************
 
-use super::{Message, MessageSender};
-
-pub use super::GenericProvider;
+pub use super::{GenericProvider, NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
 //
@@ -25,19 +23,7 @@ pub use super::GenericProvider;
 //
 // ****************************************************************************
 
-/// Implementors of the NonRequestSendable trait can be easily wrapped in a message
-/// ready for sending down a MessageSender channel endpoint. All Indication, Confirmation
-/// and Response messages must implement this.
-pub trait NonRequestSendable {
-    fn wrap(self) -> Message;
-}
-
-/// Implementors of the RequestSendable trait can be easily wrapped in a
-/// message ready for sending down a MessageSender channel endpoint. All
-/// Request messages must implement this.
-pub trait RequestSendable {
-    fn wrap(self, reply_to: &MessageSender) -> Message;
-}
+// None
 
 // ****************************************************************************
 //

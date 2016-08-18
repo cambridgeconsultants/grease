@@ -192,7 +192,6 @@ pub mod http;
 //
 // ****************************************************************************
 
-use ::prelude::*;
 use std::sync::mpsc;
 use std::thread;
 
@@ -220,8 +219,8 @@ pub type Context = usize;
 /// essential details are recorded so that a Confirmation can be sent at a
 /// later date.
 pub struct ReplyContext {
-    pub reply_to: ::MessageSender,
-    pub context: ::Context,
+    pub reply_to: MessageSender,
+    pub context: Context,
 }
 
 /// A message is the fundamental unit we pass between tasks.
@@ -292,7 +291,7 @@ pub struct PingReq {
     pub context: Context,
 }
 
-make_request!(PingReq, ::Request::Generic, GenericReq::Ping);
+make_request!(PingReq, Request::Generic, GenericReq::Ping);
 
 /// Reply to a `PingReq`
 #[derive(Debug)]
@@ -301,7 +300,7 @@ pub struct PingCfm {
     pub context: Context,
 }
 
-make_confirmation!(PingCfm, ::Confirmation::Generic, GenericCfm::Ping);
+make_confirmation!(PingCfm, Confirmation::Generic, GenericCfm::Ping);
 
 /// Should be implemented by tasks which handle GenericReq
 pub trait GenericProvider {
@@ -313,6 +312,20 @@ pub trait GenericProvider {
             }
         }
     }
+}
+
+/// Implementors of the NonRequestSendable trait can be easily wrapped in a message
+/// ready for sending down a MessageSender channel endpoint. All Indication, Confirmation
+/// and Response messages must implement this.
+pub trait NonRequestSendable {
+    fn wrap(self) -> Message;
+}
+
+/// Implementors of the RequestSendable trait can be easily wrapped in a
+/// message ready for sending down a MessageSender channel endpoint. All
+/// Request messages must implement this.
+pub trait RequestSendable {
+    fn wrap(self, reply_to: &MessageSender) -> Message;
 }
 
 // ****************************************************************************

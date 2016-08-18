@@ -48,54 +48,6 @@ pub enum SocketReq {
     Send(Box<ReqSend>),
 }
 
-/// Users of the socket task should implement this trait to
-/// make handling the incoming SocketCfm and SocketInd a little
-/// easier.
-pub trait User {
-    /// Handles a Socket Confirmation, such as you will receive after sending
-    /// a Socket Request, by unpacking the enum and routing the struct
-    /// contained within to the appropriate handler.
-    fn handle_socket_cfm(&mut self, msg: &SocketCfm) {
-        match *msg {
-            SocketCfm::Bind(ref x) => self.handle_socket_cfm_bind(&x),
-            SocketCfm::Unbind(ref x) => self.handle_socket_cfm_unbind(&x),
-            SocketCfm::Close(ref x) => self.handle_socket_cfm_close(&x),
-            SocketCfm::Send(ref x) => self.handle_socket_cfm_send(&x),
-        }
-    }
-
-    /// Called when a Bind confirmation is received.
-    fn handle_socket_cfm_bind(&mut self, msg: &CfmBind);
-
-    /// Called when an Unbind confirmation is received.
-    fn handle_socket_cfm_unbind(&mut self, msg: &CfmUnbind);
-
-    /// Called when a Close confirmation is received.
-    fn handle_socket_cfm_close(&mut self, msg: &CfmClose);
-
-    /// Called when a Send confirmation is received.
-    fn handle_socket_cfm_send(&mut self, msg: &CfmSend);
-
-    /// Handles a Socket Indication by unpacking the enum and routing the
-    /// struct contained withing to the appropriate handler.
-    fn handle_socket_ind(&mut self, msg: &SocketInd) {
-        match *msg {
-            SocketInd::Connected(ref x) => self.handle_socket_ind_connected(&x),
-            SocketInd::Dropped(ref x) => self.handle_socket_ind_dropped(&x),
-            SocketInd::Received(ref x) => self.handle_socket_ind_received(&x),
-        }
-    }
-
-    /// Handles a Connected indication.
-    fn handle_socket_ind_connected(&mut self, msg: &IndConnected);
-
-    /// Handles a connection Dropped indication.
-    fn handle_socket_ind_dropped(&mut self, msg: &IndDropped);
-
-    /// Handles a data Received indication.
-    fn handle_socket_ind_received(&mut self, msg: &IndReceived);
-}
-
 /// Confirmations sent from the Socket task in answer to a SocketReq
 #[derive(Debug)]
 pub enum SocketCfm {
@@ -274,6 +226,54 @@ make_response!(RspReceived, ::Response::Socket, SocketRsp::Received);
 // Public Types
 //
 // ****************************************************************************
+
+/// Users of the socket task should implement this trait to
+/// make handling the incoming SocketCfm and SocketInd a little
+/// easier.
+pub trait User {
+    /// Handles a Socket Confirmation, such as you will receive after sending
+    /// a Socket Request, by unpacking the enum and routing the struct
+    /// contained within to the appropriate handler.
+    fn handle_socket_cfm(&mut self, msg: &SocketCfm) {
+        match *msg {
+            SocketCfm::Bind(ref x) => self.handle_socket_cfm_bind(&x),
+            SocketCfm::Unbind(ref x) => self.handle_socket_cfm_unbind(&x),
+            SocketCfm::Close(ref x) => self.handle_socket_cfm_close(&x),
+            SocketCfm::Send(ref x) => self.handle_socket_cfm_send(&x),
+        }
+    }
+
+    /// Called when a Bind confirmation is received.
+    fn handle_socket_cfm_bind(&mut self, msg: &CfmBind);
+
+    /// Called when an Unbind confirmation is received.
+    fn handle_socket_cfm_unbind(&mut self, msg: &CfmUnbind);
+
+    /// Called when a Close confirmation is received.
+    fn handle_socket_cfm_close(&mut self, msg: &CfmClose);
+
+    /// Called when a Send confirmation is received.
+    fn handle_socket_cfm_send(&mut self, msg: &CfmSend);
+
+    /// Handles a Socket Indication by unpacking the enum and routing the
+    /// struct contained withing to the appropriate handler.
+    fn handle_socket_ind(&mut self, msg: &SocketInd) {
+        match *msg {
+            SocketInd::Connected(ref x) => self.handle_socket_ind_connected(&x),
+            SocketInd::Dropped(ref x) => self.handle_socket_ind_dropped(&x),
+            SocketInd::Received(ref x) => self.handle_socket_ind_received(&x),
+        }
+    }
+
+    /// Handles a Connected indication.
+    fn handle_socket_ind_connected(&mut self, msg: &IndConnected);
+
+    /// Handles a connection Dropped indication.
+    fn handle_socket_ind_dropped(&mut self, msg: &IndDropped);
+
+    /// Handles a data Received indication.
+    fn handle_socket_ind_received(&mut self, msg: &IndReceived);
+}
 
 /// Uniquely identifies an listening socket
 pub type ListenHandle = ::Context;

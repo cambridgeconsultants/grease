@@ -45,7 +45,7 @@ use multi_map::MultiMap;
 
 use rushttp;
 use ::socket;
-use ::socket::User;
+use ::socket::User as SocketUser;
 use ::prelude::*;
 
 // ****************************************************************************
@@ -146,7 +146,7 @@ make_request!(ReqResponseClose, ::Request::Http, HttpReq::ResponseClose);
 #[derive(Debug)]
 pub struct CfmBind {
     pub context: ::Context,
-    pub result: Result<ServerHandle, HttpError>,
+    pub result: Result<ServerHandle, Error>,
 }
 
 make_confirmation!(CfmBind, ::Confirmation::Http, HttpCfm::Bind);
@@ -156,7 +156,7 @@ make_confirmation!(CfmBind, ::Confirmation::Http, HttpCfm::Bind);
 pub struct CfmResponseStart {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpError>,
+    pub result: Result<(), Error>,
 }
 
 make_confirmation!(CfmResponseStart,
@@ -168,7 +168,7 @@ make_confirmation!(CfmResponseStart,
 pub struct CfmResponseBody {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpError>,
+    pub result: Result<(), Error>,
 }
 
 make_confirmation!(CfmResponseBody, ::Confirmation::Http, HttpCfm::ResponseBody);
@@ -178,7 +178,7 @@ make_confirmation!(CfmResponseBody, ::Confirmation::Http, HttpCfm::ResponseBody)
 pub struct CfmResponseClose {
     pub handle: ConnectionHandle,
     pub context: ::Context,
-    pub result: Result<(), HttpError>,
+    pub result: Result<(), Error>,
 }
 
 make_confirmation!(CfmResponseClose,
@@ -211,6 +211,50 @@ make_indication!(IndClosed, ::Indication::Http, HttpInd::Closed);
 //
 // ****************************************************************************
 
+/// Users of the http task should implement this trait to
+/// make handling the incoming HttpCfm and HttpInd a little
+/// easier.
+pub trait User {
+    /// Handles a Http Confirmation, such as you will receive after sending
+    /// a Http Request, by unpacking the enum and routing the struct
+    /// contained within to the appropriate handler.
+    fn handle_socket_cfm(&mut self, msg: &HttpCfm) {
+        match *msg {
+            HttpCfm::Bind(ref x) => self.handle_http_cfm_bind(&x),
+            HttpCfm::ResponseStart(ref x) => self.handle_http_cfm_response_start(&x),
+            HttpCfm::ResponseBody(ref x) => self.handle_http_cfm_response_body(&x),
+            HttpCfm::ResponseClose(ref x) => self.handle_http_cfm_response_close(&x),
+        }
+    }
+
+    /// Called when a Bind confirmation is received.
+    fn handle_http_cfm_bind(&mut self, msg: &CfmBind);
+
+    /// Called when an ResponseStart confirmation is received.
+    fn handle_http_cfm_response_start(&mut self, msg: &CfmResponseStart);
+
+    /// Called when a ResponseBody confirmation is received.
+    fn handle_http_cfm_response_body(&mut self, msg: &CfmResponseBody);
+
+    /// Called when a ResponseClose confirmation is received.
+    fn handle_http_cfm_response_close(&mut self, msg: &CfmResponseClose);
+
+    /// Handles a Http Indication by unpacking the enum and routing the
+    /// struct contained withing to the appropriate handler.
+    fn handle_http_ind(&mut self, msg: &HttpInd) {
+        match *msg {
+            HttpInd::Connected(ref x) => self.handle_http_ind_connected(&x),
+            HttpInd::Closed(ref x) => self.handle_http_ind_closed(&x),
+        }
+    }
+
+    /// Handles a Connected indication.
+    fn handle_http_ind_connected(&mut self, msg: &IndConnected);
+
+    /// Handles a connection Closed indication.
+    fn handle_http_ind_closed(&mut self, msg: &IndClosed);
+}
+
 /// A new one of these is allocated for every new HTTP server
 pub type ServerHandle = ::Context;
 
@@ -219,7 +263,7 @@ pub type ConnectionHandle = ::Context;
 
 /// All possible http task errors
 #[derive(Debug, Copy, Clone)]
-pub enum HttpError {
+pub enum Error {
     /// Used when I'm writing code and haven't added the correct error yet
     Unknown,
     /// Used if a ReqResponseXXX is sent on an invalid (perhaps recently
@@ -397,7 +441,7 @@ impl TaskContext {
         let cfm = CfmResponseStart {
             context: req_start.context,
             handle: req_start.handle,
-            result: Err(HttpError::Unknown),
+            result: Err(Error::Unknown),
         };
         reply_to.send_nonrequest(cfm);
     }
@@ -407,7 +451,7 @@ impl TaskContext {
         let cfm = CfmResponseBody {
             context: req_body.context,
             handle: req_body.handle,
-            result: Err(HttpError::Unknown),
+            result: Err(Error::Unknown),
         };
         reply_to.send_nonrequest(cfm);
     }
@@ -417,7 +461,7 @@ impl TaskContext {
         let cfm = CfmResponseClose {
             context: req_close.context,
             handle: req_close.handle,
-            result: Err(HttpError::Unknown),
+            result: Err(Error::Unknown),
         };
         reply_to.send_nonrequest(cfm);
     }
@@ -427,7 +471,7 @@ impl TaskContext {
 impl GenericProvider for TaskContext {}
 
 /// Socket specific handler methods
-impl socket::User for TaskContext {
+impl SocketUser for TaskContext {
     /// Handle a response to a socket task bind request. It's either
     /// bound our socket, or it failed, but either way we must let
     /// our user know.
@@ -449,7 +493,7 @@ impl socket::User for TaskContext {
                 Err(ref err) => {
                     let cfm = CfmBind {
                         context: reply_ctx.context,
-                        result: Err(HttpError::SocketError(*err)),
+                        result: Err(Error::SocketError(*err)),
                     };
                     reply_ctx.reply_to.send_nonrequest(cfm);
                 }
