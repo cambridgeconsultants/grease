@@ -39,10 +39,10 @@
 //
 // ****************************************************************************
 
-use std::net;
 use std::collections::HashMap;
-use multi_map::MultiMap;
+use std::net;
 
+use multi_map::MultiMap;
 use rushttp;
 use ::socket;
 use ::socket::User as SocketUser;
@@ -426,14 +426,20 @@ impl TaskContext {
         self.servers.insert(server.our_handle, None, server);
     }
 
-    fn get_server_by_socket_handle(&mut self, handle: socket::ListenHandle) -> Option<&HttpServer> {
-        self.servers.get_alt(&Some(handle))
+    fn get_server_by_socket_handle(&mut self,
+                                   handle: socket::ListenHandle)
+                                   -> Option<&mut HttpServer> {
+        self.servers.get_mut_alt(&Some(handle))
     }
 
     fn get_conn_by_socket_handle(&mut self,
-                                 handle: socket::ConnectedHandle)
-                                 -> Option<&HttpConnection> {
-        self.connections.get_alt(&handle)
+                                 handle: &socket::ConnectedHandle)
+                                 -> Option<&mut HttpConnection> {
+        self.connections.get_mut_alt(handle)
+    }
+
+    fn delete_connection_by_socket_handle(&mut self, handle: &socket::ConnectedHandle) {
+        self.connections.remove_alt(handle);
     }
 
     fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &::MessageSender) {
@@ -464,6 +470,32 @@ impl TaskContext {
             result: Err(Error::Unknown),
         };
         reply_to.send_nonrequest(cfm);
+    }
+
+    fn send_response(&self,
+                     handle: &socket::ConnectedHandle,
+                     code: rushttp::http_response::HttpResponseStatus,
+                     message: &str) {
+        // An error occured which we must tell them about
+        let mut r = rushttp::http_response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
+        r.add_header("Content-Type", "text/plain");
+        let mut output = Vec::new();
+        if let Ok(_) = r.write(&mut output) {
+            let req = socket::ReqSend {
+                handle: *handle,
+                context: 0,
+                data: output,
+            };
+            self.socket.send_request(req, &self.reply_to);
+        } else {
+            warn!("Failed to render error");
+        }
+
+        let close_req = socket::ReqClose {
+            handle: *handle,
+            context: 0,
+        };
+        self.socket.send_request(close_req, &self.reply_to);
     }
 }
 
@@ -522,13 +554,15 @@ impl SocketUser for TaskContext {
             server_handle = Some(server.our_handle);
         }
         if server_handle.is_some() {
-            debug!("New connection on {:?}!", server_handle);
             let conn = HttpConnection {
                 our_handle: self.get_ctx(),
                 server_handle: server_handle.unwrap(),
                 conn_handle: ind.open_handle,
                 parser: rushttp::http_request::HttpRequestParser::new(),
             };
+            debug!("New connection {:?}, conn={:?}",
+                   conn.our_handle,
+                   ind.open_handle);
             self.connections.insert(conn.our_handle, conn.conn_handle, conn);
         } else {
             warn!("Connection on non-existant socket handle");
@@ -541,11 +575,36 @@ impl SocketUser for TaskContext {
 
     fn handle_socket_ind_received(&mut self, ind: &socket::IndReceived) {
         debug!("Got {:?}", ind);
-        if let Some(ref mut conn) = self.get_conn_by_socket_handle(ind.handle) {
+        let mut r = None;
+        if let Some(ref mut conn) = self.get_conn_by_socket_handle(&ind.handle) {
             debug!("Got data for conn {:?}!", conn.our_handle);
-        } else {
-            warn!("Drop on non-existant socket handle");
+            r = Some(conn.parser.parse(&ind.data));
         }
+
+        match r {
+            Some(rushttp::http_request::ParseResult::Complete(req, len)) => {
+                // All done!
+                // @todo this is debug. We should send an IndConnected here
+                self.delete_connection_by_socket_handle(&ind.handle);
+                let msg = format!("Received {} chars", len);
+                self.send_response(&ind.handle,
+                                   rushttp::http_response::HttpResponseStatus::OK,
+                                   &msg);
+            }
+            Some(rushttp::http_request::ParseResult::InProgress) => {
+                // Need more data
+            }
+            Some(_) => {
+                self.delete_connection_by_socket_handle(&ind.handle);
+                self.send_response(&ind.handle,
+                                   rushttp::http_response::HttpResponseStatus::BadRequest,
+                                   "Bad Request");
+            }
+            None => {
+                warn!("Data on non-existant socket handle");
+            }
+        }
+
     }
 }
 
