@@ -685,8 +685,18 @@ impl TaskContext {
                     _: &mut TaskEventLoop,
                     req_close: &ReqClose,
                     reply_to: &::MessageSender) {
+
+        let mut found = false;
+        if let Some(_) = self.connections.remove(&req_close.handle) {
+            // Connection closes automatically??
+            found = true;
+        }
         let cfm = CfmClose {
-            result: Err(SocketError::NotImplemented),
+            result: if found {
+                Ok(())
+            } else {
+                Err(SocketError::BadHandle)
+            },
             handle: req_close.handle,
             context: req_close.context,
         };
