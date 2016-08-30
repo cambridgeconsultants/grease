@@ -5,11 +5,17 @@
 //! the layer above and waits for that layer to Request some data to be sent
 //! in reply.
 //!
+//! The language is a little tricky because an HTTP Request is represented
+//! by a `webserv::Indication` going up the stack, and then an upper layer
+//! sends back a `webserv::Request` to request that webserv transmit a
+//! HTTP response in reply to the HTTP request.
+//!
 //! The URL map for this example is:
 //!
-//! |URL        | Methods         |
-//! |-----------|-----------------|
-//! | /status   | GET             |
+//! |URL        | Methods         | Message                |
+//! |-----------|-----------------|------------------------|
+//! | /status   | GET             | IndStatusGetReceived   |
+//! |           |                 | ReqSendStatusGetResult |
 //!
 //! More URLs will follow.
 
@@ -27,7 +33,9 @@ use http;
 //
 // ****************************************************************************
 
-type WebRequestHandle = ::Context;
+/// Uniquely identifies an HTTP request received from an HTTP client.
+/// Used when sending a response to the HTTP request.
+pub type WebRequestHandle = ::Context;
 
 /// Requests that can be sent to the webserv task.
 #[derive(Debug)]
@@ -42,12 +50,14 @@ pub enum Confirmation {
 }
 
 /// Indications that can be sent from the webserv task.
+#[derive(Debug)]
 pub enum Indication {
-    StatusGet(Box<IndStatusGet>)
+    StatusGetReceived(Box<IndStatusGetReceived>)
 }
 
 /// Instructs this task to send a reply to an earlier
 /// GET on /status.
+#[derive(Debug)]
 pub struct ReqSendStatusGetResult {
     pub context: WebRequestHandle,
     pub status: u32
@@ -55,13 +65,15 @@ pub struct ReqSendStatusGetResult {
 
 /// Informs the layer above that the ReqSendStatusGetResult
 /// has been processed and the connection is closed.
+#[derive(Debug)]
 pub struct CfmSendStatusGetResult {
     pub context: WebRequestHandle,
     pub result: Result<(), Error>
 }
 
 /// Indicates a GET has been performed on /status
-pub struct IndStatusGet {
+#[derive(Debug)]
+pub struct IndStatusGetReceived {
     pub context: WebRequestHandle
 }
 
