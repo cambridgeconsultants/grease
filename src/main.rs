@@ -6,8 +6,8 @@
 //
 // ****************************************************************************
 
-extern crate grease;
 extern crate env_logger;
+extern crate grease;
 #[macro_use]
 extern crate log;
 extern crate time;
@@ -15,8 +15,8 @@ extern crate time;
 use std::env;
 use std::thread;
 
-use grease::{http, socket};
 use env_logger::LogBuilder;
+use grease::{http, socket};
 use log::{LogRecord, LogLevelFilter};
 
 
@@ -93,7 +93,7 @@ fn main() {
         let ind = rx.recv().unwrap();
         if let grease::Message::Indication(
             grease::Indication::Socket(
-                socket::SocketInd::Received(ref ind_rcv))) = ind {
+                socket::Indication::Received(ref ind_rcv))) = ind {
             info!("Got {} bytes of input", ind_rcv.data.len());
             let recv_rsp = socket::RspReceived { handle: ind_rcv.handle };
             socket_thread.send_nonrequest(recv_rsp);
@@ -102,7 +102,6 @@ fn main() {
             socket_thread.send_request(send_req, &tx);
             n = n + 1;
         }
-        drop(ind);
     }
 }
 

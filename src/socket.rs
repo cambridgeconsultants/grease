@@ -5,7 +5,6 @@
 //! receives asynchronous indications when data arrives on the socket and/or
 //! when the socket closes.
 
-#![allow(dead_code)]
 #![deny(missing_docs)]
 
 // ****************************************************************************
@@ -37,7 +36,7 @@ use ::prelude::*;
 /// We box all the parameters, in case any of the structs are large as we don't
 /// want to bloat the master Message type.
 #[derive(Debug)]
-pub enum SocketReq {
+pub enum Request {
     /// A Bind Request - Bind a listen socket
     Bind(Box<ReqBind>),
     /// An Unbind Request - Unbind a bound listen socket
@@ -48,9 +47,9 @@ pub enum SocketReq {
     Send(Box<ReqSend>),
 }
 
-/// Confirmations sent from the Socket task in answer to a SocketReq
+/// Confirmations sent from the Socket task in answer to a Request
 #[derive(Debug)]
-pub enum SocketCfm {
+pub enum Confirmation {
     /// A Bind Confirm - Bound a listen socket
     Bind(Box<CfmBind>),
     /// An Unbind Confirm - Unbound a bound listen socket
@@ -63,7 +62,7 @@ pub enum SocketCfm {
 
 /// Asynchronous indications sent by the Socket task
 #[derive(Debug)]
-pub enum SocketInd {
+pub enum Indication {
     /// A Connected Indication - Indicates that a listening socket has been connected to
     Connected(Box<IndConnected>),
     /// A Dropped Indication - Indicates that an open socket has been dropped
@@ -74,7 +73,7 @@ pub enum SocketInd {
 
 /// Responses to Indications required
 #[derive(Debug)]
-pub enum SocketRsp {
+pub enum Response {
     /// a Receieved Response - unblocks the open socket so more IndReceived can be sent
     Received(Box<RspReceived>),
 }
@@ -88,7 +87,7 @@ pub struct ReqBind {
     pub context: ::Context,
 }
 
-make_request!(ReqBind, ::Request::Socket, SocketReq::Bind);
+make_request!(ReqBind, ::Request::Socket, Request::Bind);
 
 /// Unbind a bound listen socket
 #[derive(Debug)]
@@ -99,7 +98,7 @@ pub struct ReqUnbind {
     pub context: ::Context,
 }
 
-make_request!(ReqUnbind, ::Request::Socket, SocketReq::Unbind);
+make_request!(ReqUnbind, ::Request::Socket, Request::Unbind);
 
 /// Close an open connection
 #[derive(Debug)]
@@ -110,7 +109,7 @@ pub struct ReqClose {
     pub context: ::Context,
 }
 
-make_request!(ReqClose, ::Request::Socket, SocketReq::Close);
+make_request!(ReqClose, ::Request::Socket, Request::Close);
 
 /// Send something on a connection
 pub struct ReqSend {
@@ -122,7 +121,7 @@ pub struct ReqSend {
     pub data: Vec<u8>,
 }
 
-make_request!(ReqSend, ::Request::Socket, SocketReq::Send);
+make_request!(ReqSend, ::Request::Socket, Request::Send);
 
 /// Reply to a ReqBind.
 #[derive(Debug)]
@@ -133,7 +132,7 @@ pub struct CfmBind {
     pub context: ::Context,
 }
 
-make_confirmation!(CfmBind, ::Confirmation::Socket, SocketCfm::Bind);
+make_confirmation!(CfmBind, ::Confirmation::Socket, Confirmation::Bind);
 
 /// Reply to a ReqUnbind.
 #[derive(Debug)]
@@ -146,7 +145,7 @@ pub struct CfmUnbind {
     pub context: ::Context,
 }
 
-make_confirmation!(CfmUnbind, ::Confirmation::Socket, SocketCfm::Unbind);
+make_confirmation!(CfmUnbind, ::Confirmation::Socket, Confirmation::Unbind);
 
 /// Reply to a ReqClose. Will flush out all
 /// existing data.
@@ -160,7 +159,7 @@ pub struct CfmClose {
     pub context: ::Context,
 }
 
-make_confirmation!(CfmClose, ::Confirmation::Socket, SocketCfm::Close);
+make_confirmation!(CfmClose, ::Confirmation::Socket, Confirmation::Close);
 
 /// Reply to a ReqSend. The data has not necessarily
 /// been sent, but it is safe to send some more data.
@@ -174,7 +173,7 @@ pub struct CfmSend {
     pub context: ::Context,
 }
 
-make_confirmation!(CfmSend, ::Confirmation::Socket, SocketCfm::Send);
+make_confirmation!(CfmSend, ::Confirmation::Socket, Confirmation::Send);
 
 /// Indicates that a listening socket has been connected to.
 #[derive(Debug)]
@@ -187,7 +186,7 @@ pub struct IndConnected {
     pub peer: net::SocketAddr,
 }
 
-make_indication!(IndConnected, ::Indication::Socket, SocketInd::Connected);
+make_indication!(IndConnected, ::Indication::Socket, Indication::Connected);
 
 /// Indicates that a socket has been dropped.
 #[derive(Debug)]
@@ -196,7 +195,7 @@ pub struct IndDropped {
     pub handle: ConnectedHandle,
 }
 
-make_indication!(IndDropped, ::Indication::Socket, SocketInd::Dropped);
+make_indication!(IndDropped, ::Indication::Socket, Indication::Dropped);
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
@@ -210,7 +209,7 @@ pub struct IndReceived {
     pub data: Vec<u8>,
 }
 
-make_indication!(IndReceived, ::Indication::Socket, SocketInd::Received);
+make_indication!(IndReceived, ::Indication::Socket, Indication::Received);
 
 /// Tell the task that more data can now be sent.
 #[derive(Debug)]
@@ -219,7 +218,7 @@ pub struct RspReceived {
     pub handle: ConnectedHandle,
 }
 
-make_response!(RspReceived, ::Response::Socket, SocketRsp::Received);
+make_response!(RspReceived, ::Response::Socket, Response::Received);
 
 // ****************************************************************************
 //
@@ -228,18 +227,18 @@ make_response!(RspReceived, ::Response::Socket, SocketRsp::Received);
 // ****************************************************************************
 
 /// Users of the socket task should implement this trait to
-/// make handling the incoming SocketCfm and SocketInd a little
+/// make handling the incoming Confirmation and Indication a little
 /// easier.
 pub trait User {
     /// Handles a Socket Confirmation, such as you will receive after sending
     /// a Socket Request, by unpacking the enum and routing the struct
     /// contained within to the appropriate handler.
-    fn handle_socket_cfm(&mut self, msg: &SocketCfm) {
+    fn handle_socket_cfm(&mut self, msg: &Confirmation) {
         match *msg {
-            SocketCfm::Bind(ref x) => self.handle_socket_cfm_bind(&x),
-            SocketCfm::Unbind(ref x) => self.handle_socket_cfm_unbind(&x),
-            SocketCfm::Close(ref x) => self.handle_socket_cfm_close(&x),
-            SocketCfm::Send(ref x) => self.handle_socket_cfm_send(&x),
+            Confirmation::Bind(ref x) => self.handle_socket_cfm_bind(&x),
+            Confirmation::Unbind(ref x) => self.handle_socket_cfm_unbind(&x),
+            Confirmation::Close(ref x) => self.handle_socket_cfm_close(&x),
+            Confirmation::Send(ref x) => self.handle_socket_cfm_send(&x),
         }
     }
 
@@ -257,11 +256,11 @@ pub trait User {
 
     /// Handles a Socket Indication by unpacking the enum and routing the
     /// struct contained withing to the appropriate handler.
-    fn handle_socket_ind(&mut self, msg: &SocketInd) {
+    fn handle_socket_ind(&mut self, msg: &Indication) {
         match *msg {
-            SocketInd::Connected(ref x) => self.handle_socket_ind_connected(&x),
-            SocketInd::Dropped(ref x) => self.handle_socket_ind_dropped(&x),
-            SocketInd::Received(ref x) => self.handle_socket_ind_received(&x),
+            Indication::Connected(ref x) => self.handle_socket_ind_connected(&x),
+            Indication::Dropped(ref x) => self.handle_socket_ind_dropped(&x),
+            Indication::Received(ref x) => self.handle_socket_ind_received(&x),
         }
     }
 
@@ -320,7 +319,7 @@ struct PendingWrite {
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
-    parent: ListenHandle,
+    // parent: ListenHandle,
     ind_to: ::MessageSender,
     handle: ConnectedHandle,
     connection: mio::tcp::TcpStream,
@@ -497,7 +496,7 @@ impl TaskContext {
         let ls = self.listeners.get(&ls_handle).unwrap();
         if let Some(conn_addr) = ls.listener.accept().unwrap() {
             let cs = ConnectedSocket {
-                parent: ls.handle,
+                // parent: ls.handle,
                 handle: self.next_open,
                 ind_to: ls.ind_to.clone(),
                 connection: conn_addr.0,
@@ -609,14 +608,14 @@ impl TaskContext {
     /// Handle requests
     pub fn handle_socket_req(&mut self,
                              event_loop: &mut TaskEventLoop,
-                             req: &SocketReq,
+                             req: &Request,
                              reply_to: &::MessageSender) {
         debug!("request: {:?}", req);
         match *req {
-            SocketReq::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
-            SocketReq::Unbind(ref x) => self.handle_unbind(event_loop, x, reply_to),
-            SocketReq::Close(ref x) => self.handle_close(event_loop, x, reply_to),
-            SocketReq::Send(ref x) => self.handle_send(event_loop, x, reply_to),
+            Request::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
+            Request::Unbind(ref x) => self.handle_unbind(event_loop, x, reply_to),
+            Request::Close(ref x) => self.handle_close(event_loop, x, reply_to),
+            Request::Send(ref x) => self.handle_send(event_loop, x, reply_to),
         }
     }
 
@@ -766,9 +765,9 @@ impl TaskContext {
     }
 
     /// Handle responses
-    pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, rsp: &SocketRsp) {
+    pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, rsp: &Response) {
         match *rsp {
-            SocketRsp::Received(ref x) => self.handle_received(event_loop, x),
+            Response::Received(ref x) => self.handle_received(event_loop, x),
         }
     }
 

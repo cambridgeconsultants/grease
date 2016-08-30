@@ -79,13 +79,15 @@
 /// For example:
 ///
 /// ```ignore
-/// make_request(ReqOpen, grease::Request::Foo, FooReq::Open)
+/// mod foo {
+///     make_request(ReqOpen, grease::Request::Foo, Request::Open)
+/// }
 /// ```
 ///
 /// Where `ReqOpen` is the name of a struct, `grease::Request::Foo` is the
-/// member of `grease::Request` representing the `Foo` module, and
-/// `FooReq::Open` is the member of the `FooReq` enum representing a `ReqOpen`
-/// message.
+/// member of `grease::Request` representing the `foo` module, and
+/// `Request::Open` is the member of the `Request` enum representing
+/// a `ReqOpen` message.
 #[macro_export]
 macro_rules! make_request(
     ($v:ident, $s:path, $e:path) => {
@@ -102,13 +104,15 @@ macro_rules! make_request(
 /// For example:
 ///
 /// ```ignore
-/// make_confirmation(CfmOpen, grease::Confirmation::Foo, FooCfm::Open)
+/// mod foo {
+///     make_confirmation(CfmOpen, grease::Confirmation::Foo, Confirmation::Open)
+/// }
 /// ```
 ///
 /// Where `CfmOpen` is the name of a struct, `grease::Confirmation::Foo` is
-/// the member of `grease::Confirmation` representing the `Foo` module, and
-/// `FooCfm::Open` is the member of the `FooCfm` enum representing a `CfmOpen`
-/// message.
+/// the member of `grease::Confirmation` representing the `foo` module, and
+/// `Confirmation::Open` is the member of the `Confirmation` enum
+/// representing a `CfmOpen` message.
 #[macro_export]
 macro_rules! make_confirmation(
     ($v:ident, $s:path, $e:path) => {
@@ -124,13 +128,15 @@ macro_rules! make_confirmation(
 /// For example:
 ///
 /// ```ignore
-/// make_indication(IndConnected, grease::Indication::Foo, FooInd::Connected)
+/// mod foo {
+///     make_indication(IndConnected, grease::Indication::Foo, Indication::Connected)
+/// }
 /// ```
 ///
 /// Where `IndConnected` is the name of a struct, `grease::Indication::Foo` is
-/// the member of the `grease::Indication` enum representing the `Foo` module,
-/// and `FooInd::Connected` is the member of the `FooInd` enum representing a
-/// `IndConnected` message.
+/// the member of the `grease::Indication` enum representing the `foo` module,
+/// and `Indication::Connected` is the member of the `Indication`
+/// enum representing a `IndConnected` message.
 #[macro_export]
 macro_rules! make_indication(
     ($v:ident, $s:path, $e:path) => {
@@ -146,12 +152,14 @@ macro_rules! make_indication(
 /// For example:
 ///
 /// ```ignore
-/// make_response(RspConnected, grease::Response::Foo, FooRsp::Connected)
+/// mod foo {
+///     make_response(RspConnected, grease::Response::Foo, Response::Connected)
+/// }
 /// ```
 ///
-/// Where `RspConnected` is the name of a struct, `grease::Response::Foo` is the
-/// member of `grease::Response` representing the `Foo` module, and
-/// `FooRsp::Connected` is the member of the `FooRsp` enum representing a
+/// Where `RspConnected` is the name of a struct, `grease::Response::Foo` is
+/// the member of `grease::Response` representing the `foo` module, and
+/// `Response::Connected` is the member of the `Response` enum representing a
 /// `RspConnected` message.
 #[macro_export]
 macro_rules! make_response(
@@ -173,8 +181,8 @@ macro_rules! make_response(
 #[macro_use]
 extern crate log;
 extern crate mio;
-extern crate rushttp;
 extern crate multi_map;
+extern crate rushttp;
 
 // ****************************************************************************
 //
@@ -182,9 +190,11 @@ extern crate multi_map;
 //
 // ****************************************************************************
 
-pub mod socket;
-pub mod prelude;
+pub mod app;
 pub mod http;
+pub mod prelude;
+pub mod socket;
+pub mod webserv;
 
 // ****************************************************************************
 //
@@ -240,8 +250,8 @@ pub enum Message {
 #[derive(Debug)]
 pub enum Request {
     Generic(GenericReq),
-    Socket(socket::SocketReq),
-    Http(http::HttpReq),
+    Socket(socket::Request),
+    Http(http::Request),
 }
 
 /// The set of all confirmations in the system. This should look exactly like
@@ -250,8 +260,8 @@ pub enum Request {
 #[derive(Debug)]
 pub enum Confirmation {
     Generic(GenericCfm),
-    Socket(socket::SocketCfm),
-    Http(http::HttpCfm),
+    Socket(socket::Confirmation),
+    Http(http::Confirmation),
 }
 
 /// The set of all indications in the system. This is an enumeration of all the
@@ -259,8 +269,8 @@ pub enum Confirmation {
 /// service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Indication {
-    Socket(socket::SocketInd),
-    Http(http::HttpInd),
+    Socket(socket::Indication),
+    Http(http::Indication),
 }
 
 /// The set of all responses in the system. This is an enumeration of all the
@@ -268,7 +278,7 @@ pub enum Indication {
 /// included within each service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Response {
-    Socket(socket::SocketRsp),
+    Socket(socket::Response),
 }
 
 /// Generic requests should be handled by every task.
