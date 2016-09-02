@@ -154,7 +154,7 @@ impl TaskContext {
 	fn new(http: ::MessageSender, us: ::MessageSender) -> TaskContext {
 		TaskContext {
 			http: http,
-			reply_to: us
+			reply_to: us,
 		}
 	}
 
@@ -162,7 +162,7 @@ impl TaskContext {
 	fn init(&mut self) {
 		let msg = http::ReqBind {
 			addr: "0.0.0.0:8000".parse().unwrap(),
-			context: 0
+			context: 0,
 		};
 		self.http.send_request(msg, &self.reply_to);
 	}
@@ -189,11 +189,15 @@ impl TaskContext {
 	// Handle our own requests.
 	fn handle_webserv_req(&mut self, req: &Request, reply_to: &::MessageSender) {
 		match *req {
-			Request::SendStatusGetResult(ref x) => self.handle_webserv_sendstatusgetresult_req(x, reply_to),
+			Request::SendStatusGetResult(ref x) => {
+				self.handle_webserv_sendstatusgetresult_req(x, reply_to)
+			}
 		}
 	}
 
-	fn handle_webserv_sendstatusgetresult_req(&mut self, msg: &ReqSendStatusGetResult, reply_to: &::MessageSender) {
+	fn handle_webserv_sendstatusgetresult_req(&mut self,
+	                                          msg: &ReqSendStatusGetResult,
+	                                          reply_to: &::MessageSender) {
 
 	}
 }
@@ -203,40 +207,22 @@ impl GenericProvider for TaskContext {}
 
 impl http::User for TaskContext {
 	/// Called when a Bind confirmation is received.
-	fn handle_http_cfm_bind(&mut self, msg: &http::CfmBind)
-	{
-
-	}
+	fn handle_http_cfm_bind(&mut self, msg: &http::CfmBind) {}
 
 	/// Called when an ResponseStart confirmation is received.
-	fn handle_http_cfm_response_start(&mut self, msg: &http::CfmResponseStart)
-	{
-
-	}
+	fn handle_http_cfm_response_start(&mut self, msg: &http::CfmResponseStart) {}
 
 	/// Called when a ResponseBody confirmation is received.
-	fn handle_http_cfm_response_body(&mut self, msg: &http::CfmResponseBody)
-	{
-
-	}
+	fn handle_http_cfm_response_body(&mut self, msg: &http::CfmResponseBody) {}
 
 	/// Called when a ResponseClose confirmation is received.
-	fn handle_http_cfm_response_close(&mut self, msg: &http::CfmResponseClose)
-	{
-
-	}
+	fn handle_http_cfm_response_close(&mut self, msg: &http::CfmResponseClose) {}
 
 	/// Handles a Connected indication.
-	fn handle_http_ind_connected(&mut self, msg: &http::IndConnected)
-	{
-
-	}
+	fn handle_http_ind_connected(&mut self, msg: &http::IndConnected) {}
 
 	/// Handles a connection Closed indication.
-	fn handle_http_ind_closed(&mut self, msg: &http::IndClosed)
-	{
-
-	}
+	fn handle_http_ind_closed(&mut self, msg: &http::IndClosed) {}
 }
 
 // ****************************************************************************
