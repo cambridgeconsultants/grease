@@ -22,7 +22,6 @@ use std::net;
 use std::thread;
 
 use mio;
-use mio::deprecated::Handler;
 
 use ::prelude::*;
 
@@ -303,8 +302,6 @@ pub enum SocketError {
 //
 // ****************************************************************************
 
-type TaskEventLoop = mio::deprecated::EventLoop<TaskContext>;
-
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
 	handle: ListenHandle,
@@ -338,10 +335,12 @@ struct TaskContext {
 	listeners: HashMap<ListenHandle, ListenSocket>,
 	/// Set of all connected sockets
 	connections: HashMap<ConnectedHandle, ConnectedSocket>,
-	/// The next handle we'll use for a bound socket
-	next_listen: ListenHandle,
-	/// The next handle we'll use for an open socket
-	next_open: ConnectedHandle,
+	/// The next handle we'll use for a bound/open socket
+	next_handle: ::Context,
+	/// The special channel our messages arrive on
+	mio_rx: mio::channel::Receiver<::Message>,
+	/// The object we poll on
+	poll: mio::Poll,
 }
 
 // ****************************************************************************
@@ -358,7 +357,8 @@ struct TaskContext {
 //
 // ****************************************************************************
 
-const MAX_READ_LEN: usize = 1024;
+const MAX_READ_LEN: usize = 128;
+const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 // ****************************************************************************
 //
@@ -383,52 +383,58 @@ pub fn make_task() -> ::MessageSender {
 /// channels. So, we spin up a thread to bounce from one
 /// channel to the other. We don't need our own
 /// MessageSender as we don't send Requests that need replying to.
-fn main_loop(rx: ::MessageReceiver, _: ::MessageSender) {
-	let mut event_loop = mio::deprecated::EventLoop::new().unwrap();
-	let ch = event_loop.channel();
+fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
+	let (mio_tx, mio_rx) = mio::channel::channel();
 	let _ = thread::spawn(move || {
-		for msg in rx.iter() {
-			ch.send(msg).unwrap();
+		for msg in grease_rx.iter() {
+			mio_tx.send(msg).unwrap();
 		}
 	});
-	let mut task_context = TaskContext::new();
-	event_loop.run(&mut task_context).unwrap();
-	panic!("This task should never die!");
+	let mut task_context = TaskContext::new(mio_rx);
+	loop {
+		task_context.poll();
+	}
 }
 
-/// These are our mio callbacks. They are called by the mio EventLoop
-/// when interesting things happen. We deal with the interesting thing, then
-/// the EventLoop calls another callback or waits for more interesting things.
-impl mio::deprecated::Handler for TaskContext {
-	type Timeout = u32;
-	type Message = ::Message;
+impl TaskContext {
+	fn poll(&mut self) {
+		let mut events = mio::Events::with_capacity(1024);
+		let num_events = self.poll.poll(&mut events, None).unwrap();
+		warn!("Woke up! num_events={}", num_events);
+		for event in events.iter() {
+			self.ready(event.token(), event.kind())
+		}
+	}
 
 	/// Called when mio has an update on a registered listener or connection
 	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
-	fn ready(&mut self, event_loop: &mut TaskEventLoop, token: mio::Token, events: mio::Ready) {
-		debug!("Ready!");
+	fn ready(&mut self, token: mio::Token, ready: mio::Ready) {
+		debug!("ready={:?}, token={:?}!", ready, token);
 		let handle = token.0;
-		if events.is_readable() {
-			if self.listeners.contains_key(&handle) {
-				self.accept(event_loop, handle)
+		if ready.is_readable() {
+			if token == MESSAGE_TOKEN {
+				let msg = self.mio_rx.try_recv().unwrap();
+				self.handle_message(msg);
+			} else if self.listeners.contains_key(&handle) {
+				debug!("Readable listen socket {}?", handle);
+				self.accept(handle)
 			} else if self.connections.contains_key(&handle) {
-				self.read(event_loop, handle)
+				debug!("Readable connected socket {}", handle);
+				self.read(handle)
 			} else {
 				warn!("Readable on unknown token {}", handle);
 			}
-		}
-		if events.is_writable() {
+		} else if ready.is_writable() {
 			if self.listeners.contains_key(&handle) {
 				debug!("Writable listen socket {}?", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("Writable connected socket {}", handle);
-				self.pending_writes(event_loop, handle);
+				self.pending_writes(handle);
 			} else {
 				warn!("Writable on unknown token {}", handle);
 			}
-		}
-		if events.is_error() {
+		} else if ready.is_error() {
 			if self.listeners.contains_key(&handle) {
 				debug!("Error listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
@@ -436,13 +442,12 @@ impl mio::deprecated::Handler for TaskContext {
 			} else {
 				warn!("Error on unknown token {}", handle);
 			}
-		}
-		if events.is_hup() {
+		} else if ready.is_hup() {
 			if self.listeners.contains_key(&handle) {
 				debug!("HUP listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("HUP connected socket {}", handle);
-				self.dropped(event_loop, handle);
+				self.dropped(handle);
 			} else {
 				warn!("HUP on unknown token {}", handle);
 			}
@@ -450,18 +455,18 @@ impl mio::deprecated::Handler for TaskContext {
 		debug!("Ready is done");
 	}
 
-	/// Called when mio (i.e. our task) has received a message
-	fn notify(&mut self, event_loop: &mut TaskEventLoop, msg: ::Message) {
+	/// Called when mio (i.e. our task) has received a Message
+	fn handle_message(&mut self, msg: ::Message) {
 		debug!("Notify!");
 		match msg {
 			// We only handle our own requests and responses
 			::Message::Request(ref reply_to, ::Request::Socket(ref x)) => {
-				self.handle_socket_req(event_loop, x, reply_to)
+				self.handle_socket_req(x, reply_to)
 			}
 			::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
 				self.handle_generic_req(x, reply_to)
 			}
-			::Message::Response(::Response::Socket(ref x)) => self.handle_socket_rsp(event_loop, x),
+			::Message::Response(::Response::Socket(ref x)) => self.handle_socket_rsp(x),
 			// We don't expect any Indications or Confirmations from other providers
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in socket task: {:?}", msg),
@@ -469,68 +474,59 @@ impl mio::deprecated::Handler for TaskContext {
 		debug!("Notify is done");
 	}
 
-	/// Should never be called - we don't have a timeout on our poll
-	fn timeout(&mut self, _: &mut TaskEventLoop, _: Self::Timeout) {}
-
-	/// Not sure when this is called
-	fn interrupted(&mut self, _: &mut TaskEventLoop) {}
-
-	/// Not sure when this is called but I don't think we need to
-	/// do anything
-	fn tick(&mut self, _: &mut TaskEventLoop) {}
-}
-
-impl TaskContext {
 	/// Init the context
-	pub fn new() -> TaskContext {
-		TaskContext {
+	pub fn new(mio_rx: mio::channel::Receiver<::Message>) -> TaskContext {
+		let t = TaskContext {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
-			// It helps the debug to keep these two apart
-			next_listen: 3_000,
-			next_open: 4_000,
-		}
+			next_handle: MESSAGE_TOKEN.0 + 1,
+			mio_rx: mio_rx,
+			poll: mio::Poll::new().unwrap(),
+		};
+		t.poll
+			.register(&t.mio_rx,
+			          MESSAGE_TOKEN,
+			          mio::Ready::readable(),
+			          mio::PollOpt::level())
+			.unwrap();
+		t
 	}
 
 	/// Accept a new incoming connection and let the user know
 	/// with a IndConnected
-	fn accept(&mut self, event_loop: &mut TaskEventLoop, ls_handle: ListenHandle) {
+	fn accept(&mut self, ls_handle: ListenHandle) {
 		// We know this exists because we checked it before we got here
 		let ls = self.listeners.get(&ls_handle).unwrap();
 		if let Ok((stream, conn_addr)) = ls.listener.accept() {
 			let cs = ConnectedSocket {
 				// parent: ls.handle,
-				handle: self.next_open,
+				handle: self.next_handle,
 				ind_to: ls.ind_to.clone(),
 				connection: stream,
 				outstanding: false,
 				pending_writes: VecDeque::new(),
 			};
-			self.next_open += 1;
-			match event_loop.register(&cs.connection,
-			                          mio::Token(cs.handle),
-			                          mio::Ready::readable() | mio::Ready::hup() |
-			                          mio::Ready::error() |
-			                          mio::Ready::writable(),
-			                          mio::PollOpt::edge()) {
-				Ok(_) => {
-					let ind = IndConnected {
-						listen_handle: ls.handle,
-						open_handle: cs.handle,
-						peer: conn_addr,
-					};
-					self.connections.insert(cs.handle, cs);
-					ls.ind_to.send_nonrequest(ind);
-				}
-				Err(err) => warn!("Fumbled incoming connection: {}", err),
-			}
+			self.next_handle += 1;
+			self.poll
+				.register(&cs.connection,
+				          mio::Token(cs.handle),
+				          mio::Ready::readable() | mio::Ready::error() | mio::Ready::hup(),
+				          mio::PollOpt::level() | mio::PollOpt::oneshot())
+				.unwrap();
+			let ind = IndConnected {
+				listen_handle: ls.handle,
+				open_handle: cs.handle,
+				peer: conn_addr,
+			};
+			self.connections.insert(cs.handle, cs);
+			ls.ind_to.send_nonrequest(ind);
 		} else {
 			warn!("accept returned None!");
 		}
 	}
 
 	/// Data can be sent a connected socket. Send what we have
-	fn pending_writes(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+	fn pending_writes(&mut self, cs_handle: ConnectedHandle) {
 		// We know this exists because we checked it before we got here
 		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
 		loop {
@@ -569,10 +565,34 @@ impl TaskContext {
 				break;
 			}
 		}
+		TaskContext::reregister(&cs, &self.poll);
+	}
+
+	fn reregister(cs: &ConnectedSocket, poll: &mio::Poll) {
+		// Find out when it's writable again
+		let mut rw = false;
+		let mut r = mio::Ready::error() | mio::Ready::hup();
+		if !cs.outstanding {
+			r = r | mio::Ready::readable();
+			rw = true;
+			debug!("Re-registering {} as readable", cs.handle);
+		}
+		if cs.pending_writes.len() > 0 {
+			r = r | mio::Ready::writable();
+			rw = true;
+			debug!("Re-registering {} as writable", cs.handle);
+		}
+		if rw {
+			poll.reregister(&cs.connection,
+				            mio::Token(cs.handle),
+				            r,
+				            mio::PollOpt::level() | mio::PollOpt::oneshot())
+				.unwrap();
+		}
 	}
 
 	/// Data is available on a connected socket. Pass it up
-	fn read(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+	fn read(&mut self, cs_handle: ConnectedHandle) {
 		debug!("Reading connection {}", cs_handle);
 		// We know this exists because we checked it before we got here
 		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
@@ -581,7 +601,9 @@ impl TaskContext {
 			// Cap the max amount we will read
 			let mut buffer = vec![0u8; MAX_READ_LEN];
 			match cs.connection.read(buffer.as_mut_slice()) {
-				Ok(0) => {}
+				Ok(0) => {
+					debug!("Read nothing");
+				}
 				Ok(len) => {
 					debug!("Read {} octets", len);
 					let _ = buffer.split_off(len);
@@ -594,44 +616,39 @@ impl TaskContext {
 				}
 				Err(_) => {}
 			}
+		} else {
+			debug!("Not reading - outstanding ind")
 		}
+		TaskContext::reregister(&cs, &self.poll);
 	}
 
 	/// Connection has gone away. Clean up.
-	fn dropped(&mut self, _: &mut TaskEventLoop, cs_handle: ConnectedHandle) {
+	fn dropped(&mut self, cs_handle: ConnectedHandle) {
 		// We know this exists because we checked it before we got here
-		{
-			let cs = self.connections.get(&cs_handle).unwrap();
-			let ind = IndDropped { handle: cs_handle };
-			cs.ind_to.send_nonrequest(ind);
-		}
-		self.connections.remove(&cs_handle);
+		let cs = self.connections.remove(&cs_handle).unwrap();
+		self.poll.deregister(&cs.connection).unwrap();
+		let ind = IndDropped { handle: cs_handle };
+		cs.ind_to.send_nonrequest(ind);
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self,
-	                         event_loop: &mut TaskEventLoop,
-	                         req: &Request,
-	                         reply_to: &::MessageSender) {
+	pub fn handle_socket_req(&mut self, req: &Request, reply_to: &::MessageSender) {
 		debug!("request: {:?}", req);
 		match *req {
-			Request::Bind(ref x) => self.handle_bind(event_loop, x, reply_to),
-			Request::Unbind(ref x) => self.handle_unbind(event_loop, x, reply_to),
-			Request::Close(ref x) => self.handle_close(event_loop, x, reply_to),
-			Request::Send(ref x) => self.handle_send(event_loop, x, reply_to),
+			Request::Bind(ref x) => self.handle_bind(x, reply_to),
+			Request::Unbind(ref x) => self.handle_unbind(x, reply_to),
+			Request::Close(ref x) => self.handle_close(x, reply_to),
+			Request::Send(ref x) => self.handle_send(x, reply_to),
 		}
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self,
-	               event_loop: &mut TaskEventLoop,
-	               req_bind: &ReqBind,
-	               reply_to: &::MessageSender) {
+	fn handle_bind(&mut self, req_bind: &ReqBind, reply_to: &::MessageSender) {
 		info!("Binding {}...", req_bind.addr);
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
-				let h = self.next_listen;
-				self.next_listen += 1;
+				let h = self.next_handle;
+				self.next_handle += 1;
 				debug!("Allocated listen handle {}", h);
 				let l = ListenSocket {
 					handle: h,
@@ -640,10 +657,10 @@ impl TaskContext {
 					ind_to: reply_to.clone(),
 					listener: server,
 				};
-				match event_loop.register(&l.listener,
-				                          mio::Token(h),
-				                          mio::Ready::readable(),
-				                          mio::PollOpt::edge()) {
+				match self.poll.register(&l.listener,
+				                         mio::Token(h),
+				                         mio::Ready::readable(),
+				                         mio::PollOpt::edge()) {
 					Ok(_) => {
 						self.listeners.insert(h, l);
 						CfmBind {
@@ -670,10 +687,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqUnbind.
-	fn handle_unbind(&mut self,
-	                 _: &mut TaskEventLoop,
-	                 req_unbind: &ReqUnbind,
-	                 reply_to: &::MessageSender) {
+	fn handle_unbind(&mut self, req_unbind: &ReqUnbind, reply_to: &::MessageSender) {
 		let cfm = CfmClose {
 			result: Err(SocketError::NotImplemented),
 			handle: req_unbind.handle,
@@ -683,11 +697,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self,
-	                _: &mut TaskEventLoop,
-	                req_close: &ReqClose,
-	                reply_to: &::MessageSender) {
-
+	fn handle_close(&mut self, req_close: &ReqClose, reply_to: &::MessageSender) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -706,10 +716,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self,
-	               _: &mut TaskEventLoop,
-	               req_send: &ReqSend,
-	               reply_to: &::MessageSender) {
+	fn handle_send(&mut self, req_send: &ReqSend, reply_to: &::MessageSender) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -768,14 +775,14 @@ impl TaskContext {
 	}
 
 	/// Handle responses
-	pub fn handle_socket_rsp(&mut self, event_loop: &mut TaskEventLoop, rsp: &Response) {
+	pub fn handle_socket_rsp(&mut self, rsp: &Response) {
 		match *rsp {
-			Response::Received(ref x) => self.handle_received(event_loop, x),
+			Response::Received(ref x) => self.handle_received(x),
 		}
 	}
 
 	/// Someone wants more data
-	fn handle_received(&mut self, event_loop: &mut TaskEventLoop, rsp_received: &RspReceived) {
+	fn handle_received(&mut self, rsp_received: &RspReceived) {
 		let mut need_read = false;
 		// Read response handle might not be valid - it might
 		// have crossed over with a disconnect.
@@ -788,7 +795,7 @@ impl TaskContext {
 		}
 		if need_read {
 			// Try and read it - won't hurt if we can't.
-			self.read(event_loop, rsp_received.handle)
+			self.read(rsp_received.handle)
 		}
 	}
 }
@@ -834,9 +841,9 @@ mod test {
 impl fmt::Debug for IndReceived {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f,
-		       "IndReceived {{ handle: {}, data.len: {} }}",
-		       self.handle,
-		       self.data.len())
+			   "IndReceived {{ handle: {}, data.len: {} }}",
+			   self.handle,
+			   self.data.len())
 	}
 }
 
@@ -844,9 +851,9 @@ impl fmt::Debug for IndReceived {
 impl fmt::Debug for ReqSend {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f,
-		       "ReqSend {{ handle: {}, data.len: {} }}",
-		       self.handle,
-		       self.data.len())
+			   "ReqSend {{ handle: {}, data.len: {} }}",
+			   self.handle,
+			   self.data.len())
 	}
 }
 
