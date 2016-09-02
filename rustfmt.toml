@@ -1,0 +1,5 @@
+hard_tabs = true
+verbose = true
+normalize_comments = true
+report_todos = true
+report_fixmes = true

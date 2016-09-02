@@ -40,53 +40,53 @@ pub type WebRequestHandle = ::Context;
 /// Requests that can be sent to the webserv task.
 #[derive(Debug)]
 pub enum Request {
-    SendStatusGetResult(Box<ReqSendStatusGetResult>)
+	SendStatusGetResult(Box<ReqSendStatusGetResult>),
 }
 
 /// Confirmations sent in reply to Requests.
 #[derive(Debug)]
 pub enum Confirmation {
-    SendStatusGetResult(Box<CfmSendStatusGetResult>)
+	SendStatusGetResult(Box<CfmSendStatusGetResult>),
 }
 
 /// Indications that can be sent from the webserv task.
 #[derive(Debug)]
 pub enum Indication {
-    StatusGetReceived(Box<IndStatusGetReceived>)
+	StatusGetReceived(Box<IndStatusGetReceived>),
 }
 
 /// Instructs this task to send a reply to an earlier
 /// GET on /status.
 #[derive(Debug)]
 pub struct ReqSendStatusGetResult {
-    pub context: WebRequestHandle,
-    pub status: u32
+	pub context: WebRequestHandle,
+	pub status: u32,
 }
 
 /// Informs the layer above that the ReqSendStatusGetResult
 /// has been processed and the connection is closed.
 #[derive(Debug)]
 pub struct CfmSendStatusGetResult {
-    pub context: WebRequestHandle,
-    pub result: Result<(), Error>
+	pub context: WebRequestHandle,
+	pub result: Result<(), Error>,
 }
 
 /// Indicates a GET has been performed on /status
 #[derive(Debug)]
 pub struct IndStatusGetReceived {
-    pub context: WebRequestHandle
+	pub context: WebRequestHandle,
 }
 
 /// All possible webserv task errors
 #[derive(Debug, Copy, Clone)]
 pub enum Error {
-    /// Used when I'm writing code and haven't added the correct error yet
-    Unknown,
-    /// Used if a ReqXXXResult is sent on an invalid (perhaps recently
-    /// closed) WebRequestHandle.
-    BadHandle,
-    /// http task failed,
-    HttpError(http::Error),
+	/// Used when I'm writing code and haven't added the correct error yet
+	Unknown,
+	/// Used if a ReqXXXResult is sent on an invalid (perhaps recently
+	/// closed) WebRequestHandle.
+	BadHandle,
+	/// http task failed,
+	HttpError(http::Error),
 }
 
 // ****************************************************************************

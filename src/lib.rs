@@ -105,7 +105,8 @@ macro_rules! make_request(
 ///
 /// ```ignore
 /// mod foo {
-///     make_confirmation(CfmOpen, grease::Confirmation::Foo, Confirmation::Open)
+/// make_confirmation(CfmOpen, grease::Confirmation::Foo,
+/// Confirmation::Open)
 /// }
 /// ```
 ///
@@ -129,7 +130,8 @@ macro_rules! make_confirmation(
 ///
 /// ```ignore
 /// mod foo {
-///     make_indication(IndConnected, grease::Indication::Foo, Indication::Connected)
+/// make_indication(IndConnected, grease::Indication::Foo,
+/// Indication::Connected)
 /// }
 /// ```
 ///
@@ -229,8 +231,8 @@ pub type Context = usize;
 /// essential details are recorded so that a Confirmation can be sent at a
 /// later date.
 pub struct ReplyContext {
-    pub reply_to: MessageSender,
-    pub context: Context,
+	pub reply_to: MessageSender,
+	pub context: Context,
 }
 
 /// A message is the fundamental unit we pass between tasks.
@@ -238,10 +240,10 @@ pub struct ReplyContext {
 /// object that should be used to send the confirmation in reply.
 #[derive(Debug)]
 pub enum Message {
-    Request(MessageSender, Request),
-    Confirmation(Confirmation),
-    Indication(Indication),
-    Response(Response),
+	Request(MessageSender, Request),
+	Confirmation(Confirmation),
+	Indication(Indication),
+	Response(Response),
 }
 
 /// The set of all requests in the system. This is an enumeration of all the
@@ -249,9 +251,9 @@ pub enum Message {
 /// probably defined in that service's module.
 #[derive(Debug)]
 pub enum Request {
-    Generic(GenericReq),
-    Socket(socket::Request),
-    Http(http::Request),
+	Generic(GenericReq),
+	Socket(socket::Request),
+	Http(http::Request),
 }
 
 /// The set of all confirmations in the system. This should look exactly like
@@ -259,9 +261,9 @@ pub enum Request {
 /// that send requests - you send a request and you get a confirmation back.
 #[derive(Debug)]
 pub enum Confirmation {
-    Generic(GenericCfm),
-    Socket(socket::Confirmation),
-    Http(http::Confirmation),
+	Generic(GenericCfm),
+	Socket(socket::Confirmation),
+	Http(http::Confirmation),
 }
 
 /// The set of all indications in the system. This is an enumeration of all the
@@ -269,8 +271,8 @@ pub enum Confirmation {
 /// service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Indication {
-    Socket(socket::Indication),
-    Http(http::Indication),
+	Socket(socket::Indication),
+	Http(http::Indication),
 }
 
 /// The set of all responses in the system. This is an enumeration of all the
@@ -278,27 +280,27 @@ pub enum Indication {
 /// included within each service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Response {
-    Socket(socket::Response),
+	Socket(socket::Response),
 }
 
 /// Generic requests should be handled by every task.
 #[derive(Debug)]
 pub enum GenericReq {
-    Ping(Box<PingReq>),
+	Ping(Box<PingReq>),
 }
 
 /// There is exactly one `GenericCfm` for every `GenericReq`. These should be
 /// handled by every task that can ever send a `GenericReq`.
 #[derive(Debug)]
 pub enum GenericCfm {
-    Ping(Box<PingCfm>),
+	Ping(Box<PingCfm>),
 }
 
 /// A simple ping - receiving task should send a `PingCfm` in reply
 #[derive(Debug)]
 pub struct PingReq {
-    /// This will be reflected in the `PingCfm` to aid message association
-    pub context: Context,
+	/// This will be reflected in the `PingCfm` to aid message association
+	pub context: Context,
 }
 
 make_request!(PingReq, Request::Generic, GenericReq::Ping);
@@ -306,36 +308,38 @@ make_request!(PingReq, Request::Generic, GenericReq::Ping);
 /// Reply to a `PingReq`
 #[derive(Debug)]
 pub struct PingCfm {
-    /// This is reflected from the `PingReq` to aid message association
-    pub context: Context,
+	/// This is reflected from the `PingReq` to aid message association
+	pub context: Context,
 }
 
 make_confirmation!(PingCfm, Confirmation::Generic, GenericCfm::Ping);
 
 /// Should be implemented by tasks which handle GenericReq
 pub trait GenericProvider {
-    fn handle_generic_req(&mut self, req: &GenericReq, reply_to: &MessageSender) {
-        match *req {
-            GenericReq::Ping(ref x) => {
-                let cfm = PingCfm { context: x.context };
-                reply_to.send_nonrequest(cfm);
-            }
-        }
-    }
+	fn handle_generic_req(&mut self, req: &GenericReq, reply_to: &MessageSender) {
+		match *req {
+			GenericReq::Ping(ref x) => {
+				let cfm = PingCfm { context: x.context };
+				reply_to.send_nonrequest(cfm);
+			}
+		}
+	}
 }
 
-/// Implementors of the NonRequestSendable trait can be easily wrapped in a message
-/// ready for sending down a MessageSender channel endpoint. All Indication, Confirmation
+/// Implementors of the NonRequestSendable trait can be easily wrapped in a
+/// message
+/// ready for sending down a MessageSender channel endpoint. All Indication,
+/// Confirmation
 /// and Response messages must implement this.
 pub trait NonRequestSendable {
-    fn wrap(self) -> Message;
+	fn wrap(self) -> Message;
 }
 
 /// Implementors of the RequestSendable trait can be easily wrapped in a
 /// message ready for sending down a MessageSender channel endpoint. All
 /// Request messages must implement this.
 pub trait RequestSendable {
-    fn wrap(self, reply_to: &MessageSender) -> Message;
+	fn wrap(self, reply_to: &MessageSender) -> Message;
 }
 
 // ****************************************************************************
@@ -376,15 +380,15 @@ pub trait RequestSendable {
 /// # }
 /// ```
 pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
-    where F: FnOnce(MessageReceiver, MessageSender),
-          F: Send + 'static
+	where F: FnOnce(MessageReceiver, MessageSender),
+	      F: Send + 'static
 {
-    let (sender, receiver) = make_channel();
-    let angle_name = format!("<{}>", name);
-    let sender_clone = sender.clone();
-    let tb = thread::Builder::new().name(angle_name);
-    let _handle = tb.spawn(move || main_loop(receiver, sender_clone));
-    return sender;
+	let (sender, receiver) = make_channel();
+	let angle_name = format!("<{}>", name);
+	let sender_clone = sender.clone();
+	let tb = thread::Builder::new().name(angle_name);
+	let _handle = tb.spawn(move || main_loop(receiver, sender_clone));
+	return sender;
 }
 
 /// Helper function to create a pair of objects for sending and receiving
@@ -394,8 +398,8 @@ pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
 /// the pipe can be cloned and given to other people, so they can also send
 /// things down it.
 pub fn make_channel() -> (MessageSender, MessageReceiver) {
-    let (tx, rx) = mpsc::channel::<Message>();
-    return (MessageSender(tx), MessageReceiver(rx));
+	let (tx, rx) = mpsc::channel::<Message>();
+	return (MessageSender(tx), MessageReceiver(rx));
 }
 
 
@@ -406,9 +410,9 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
 /// In a future version, this logging might be in binary format over some sort
 /// of socket.
 impl Drop for Message {
-    fn drop(&mut self) {
-        debug!("** Destroyed {:?}", self);
-    }
+	fn drop(&mut self) {
+		debug!("** Destroyed {:?}", self);
+	}
 }
 
 /// This is the 'receive' end of our message pipe. It wraps up an
@@ -416,50 +420,51 @@ impl Drop for Message {
 /// `RequestSendable` and `NonRequestSendable` messages and wrap them in a
 /// covering `Message` enum.
 impl MessageSender {
-    /// Used for sending requests to a task. The `reply_to` value is a separate
-    /// argument because it is mandatory. It would be an error to send a request
-    /// without indicating where the matching confirmation should be sent.
-    pub fn send_request<T: RequestSendable>(&self, msg: T, reply_to: &MessageSender) {
-        self.0.send(msg.wrap(reply_to)).unwrap();
-    }
+	/// Used for sending requests to a task. The `reply_to` value is a separate
+	/// argument because it is mandatory. It would be an error to send a request
+	/// without indicating where the matching confirmation should be sent.
+	pub fn send_request<T: RequestSendable>(&self, msg: T, reply_to: &MessageSender) {
+		self.0.send(msg.wrap(reply_to)).unwrap();
+	}
 
-    /// Used for sending confirmations, indications and responses to a task.
-    /// There is no `reply_to` argument because these messages do not usually
-    /// generate a response. The exception is that some `Indication`s do generate
-    /// a `Response`, but where this is the case, the receiving task will
-    /// already know where the `Indication` came from as it must have first sent
-    /// a `Request` to trigger the `Indication` in the first place.
-    pub fn send_nonrequest<T: NonRequestSendable>(&self, msg: T) {
-        self.0.send(msg.wrap()).unwrap();
-    }
+	/// Used for sending confirmations, indications and responses to a task.
+	/// There is no `reply_to` argument because these messages do not usually
+	/// generate a response. The exception is that some `Indication`s do
+	/// generate
+	/// a `Response`, but where this is the case, the receiving task will
+	/// already know where the `Indication` came from as it must have first sent
+	/// a `Request` to trigger the `Indication` in the first place.
+	pub fn send_nonrequest<T: NonRequestSendable>(&self, msg: T) {
+		self.0.send(msg.wrap()).unwrap();
+	}
 
-    /// Used for sending wrapped `Message` objects. Not often required - use
-    /// `send_request` and `send_nonrequest` in preference.
-    pub fn send(&self, msg: Message) {
-        self.0.send(msg).unwrap()
-    }
+	/// Used for sending wrapped `Message` objects. Not often required - use
+	/// `send_request` and `send_nonrequest` in preference.
+	pub fn send(&self, msg: Message) {
+		self.0.send(msg).unwrap()
+	}
 
-    /// Creates a clone of this MessageSender. The clone can then be kept
-    /// for sending messages at a later date, without consuming the original.
-    pub fn clone(&self) -> MessageSender {
-        MessageSender(self.0.clone())
-    }
+	/// Creates a clone of this MessageSender. The clone can then be kept
+	/// for sending messages at a later date, without consuming the original.
+	pub fn clone(&self) -> MessageSender {
+		MessageSender(self.0.clone())
+	}
 }
 
 /// This is the 'output' end of our message pipe. It wraps up an
 /// `mpsc::Sender`, performing a bit of repetitive boilerplate code.
 impl MessageReceiver {
-    /// Useful for test code, but a task implementation should call `iter` in
-    /// preference.
-    pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
-        self.0.recv()
-    }
+	/// Useful for test code, but a task implementation should call `iter` in
+	/// preference.
+	pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
+		self.0.recv()
+	}
 
-    /// Allows the caller to repeatedly block on new messages.
-    /// Iteration ends when channel is destroyed (usually on system shutdown).
-    pub fn iter(&self) -> mpsc::Iter<Message> {
-        self.0.iter()
-    }
+	/// Allows the caller to repeatedly block on new messages.
+	/// Iteration ends when channel is destroyed (usually on system shutdown).
+	pub fn iter(&self) -> mpsc::Iter<Message> {
+		self.0.iter()
+	}
 }
 
 // ****************************************************************************
@@ -470,21 +475,21 @@ impl MessageReceiver {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_make_channel() {
-        let (tx, rx) = ::make_channel();
-        let test_req = ::PingReq { context: 1234 };
-        tx.send_request(test_req, &tx);
-        let msg = rx.recv();
-        println!("Got {:?}", msg);
-        let msg = msg.unwrap();
-        match msg {
-            ::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {
-                assert_eq!(x.context, 1234);
-            }
-            _ => panic!("Bad match"),
-        }
-    }
+	#[test]
+	fn test_make_channel() {
+		let (tx, rx) = ::make_channel();
+		let test_req = ::PingReq { context: 1234 };
+		tx.send_request(test_req, &tx);
+		let msg = rx.recv();
+		println!("Got {:?}", msg);
+		let msg = msg.unwrap();
+		match msg {
+			::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {
+				assert_eq!(x.context, 1234);
+			}
+			_ => panic!("Bad match"),
+		}
+	}
 }
 
 // ****************************************************************************
