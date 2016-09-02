@@ -425,7 +425,8 @@ impl TaskContext {
 			} else {
 				warn!("Readable on unknown token {}", handle);
 			}
-		} else if ready.is_writable() {
+		}
+		if ready.is_writable() {
 			if self.listeners.contains_key(&handle) {
 				debug!("Writable listen socket {}?", handle);
 			} else if self.connections.contains_key(&handle) {
@@ -434,15 +435,18 @@ impl TaskContext {
 			} else {
 				warn!("Writable on unknown token {}", handle);
 			}
-		} else if ready.is_error() {
+		}
+		if ready.is_error() {
 			if self.listeners.contains_key(&handle) {
 				debug!("Error listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("Error connected socket {}", handle);
+				self.dropped(handle);
 			} else {
 				warn!("Error on unknown token {}", handle);
 			}
-		} else if ready.is_hup() {
+		}
+		if ready.is_hup() {
 			if self.listeners.contains_key(&handle) {
 				debug!("HUP listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
@@ -510,8 +514,9 @@ impl TaskContext {
 			self.poll
 				.register(&cs.connection,
 				          mio::Token(cs.handle),
-				          mio::Ready::readable() | mio::Ready::error() | mio::Ready::hup(),
-				          mio::PollOpt::level() | mio::PollOpt::oneshot())
+				          mio::Ready::readable() | mio::Ready::writable() | mio::Ready::hup() |
+				          mio::Ready::error(),
+				          mio::PollOpt::edge())
 				.unwrap();
 			let ind = IndConnected {
 				listen_handle: ls.handle,
@@ -565,30 +570,6 @@ impl TaskContext {
 				break;
 			}
 		}
-		TaskContext::reregister(&cs, &self.poll);
-	}
-
-	fn reregister(cs: &ConnectedSocket, poll: &mio::Poll) {
-		// Find out when it's writable again
-		let mut rw = false;
-		let mut r = mio::Ready::error() | mio::Ready::hup();
-		if !cs.outstanding {
-			r = r | mio::Ready::readable();
-			rw = true;
-			debug!("Re-registering {} as readable", cs.handle);
-		}
-		if cs.pending_writes.len() > 0 {
-			r = r | mio::Ready::writable();
-			rw = true;
-			debug!("Re-registering {} as writable", cs.handle);
-		}
-		if rw {
-			poll.reregister(&cs.connection,
-				            mio::Token(cs.handle),
-				            r,
-				            mio::PollOpt::level() | mio::PollOpt::oneshot())
-				.unwrap();
-		}
 	}
 
 	/// Data is available on a connected socket. Pass it up
@@ -619,7 +600,6 @@ impl TaskContext {
 		} else {
 			debug!("Not reading - outstanding ind")
 		}
-		TaskContext::reregister(&cs, &self.poll);
 	}
 
 	/// Connection has gone away. Clean up.
