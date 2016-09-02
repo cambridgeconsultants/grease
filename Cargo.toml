@@ -3,14 +3,12 @@ name = "grease"
 version = "0.3.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
 
-[[bin]]
-name = "example"
-doc = false
+[dev-dependencies]
+env_logger = "0.3"
+time = "0.1"
 
 [dependencies]
 log = "0.3"
-env_logger = "0.3"
-time = "0.1"
 mio = "0.5"
 rushttp = { git = "https://github.com/thejpster/rushttp.git" }
 multi-map = "^1.0"
