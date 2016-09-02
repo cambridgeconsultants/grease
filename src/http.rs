@@ -222,7 +222,7 @@ pub trait User {
 	/// Handles a Http Confirmation, such as you will receive after sending
 	/// a Http Request, by unpacking the enum and routing the struct
 	/// contained within to the appropriate handler.
-	fn handle_socket_cfm(&mut self, msg: &Confirmation) {
+	fn handle_http_cfm(&mut self, msg: &Confirmation) {
 		match *msg {
 			Confirmation::Bind(ref x) => self.handle_http_cfm_bind(&x),
 			Confirmation::ResponseStart(ref x) => self.handle_http_cfm_response_start(&x),
@@ -279,6 +279,14 @@ pub enum Error {
 
 // ****************************************************************************
 //
+// Public Data
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
 // Private Types
 //
 // ****************************************************************************
@@ -322,14 +330,6 @@ struct TaskContext {
 
 // ****************************************************************************
 //
-// Public Data
-//
-// ****************************************************************************
-
-// None
-
-// ****************************************************************************
-//
 // Public Functions
 //
 // ****************************************************************************
@@ -349,9 +349,6 @@ pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
 // ****************************************************************************
 
 /// The task runs this main loop indefinitely.
-/// Unfortunately, to use mio, we have to use their special
-/// channels. So, we spin up a thread to bounce from one
-/// channel to the other.
 fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, socket: ::MessageSender) {
 	let mut t = TaskContext::new(socket, tx);
 	for msg in rx.iter() {

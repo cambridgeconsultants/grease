@@ -254,6 +254,7 @@ pub enum Request {
 	Generic(GenericReq),
 	Socket(socket::Request),
 	Http(http::Request),
+	WebServ(webserv::Request),
 }
 
 /// The set of all confirmations in the system. This should look exactly like
@@ -264,6 +265,7 @@ pub enum Confirmation {
 	Generic(GenericCfm),
 	Socket(socket::Confirmation),
 	Http(http::Confirmation),
+	WebServ(webserv::Confirmation),
 }
 
 /// The set of all indications in the system. This is an enumeration of all the
@@ -273,6 +275,7 @@ pub enum Confirmation {
 pub enum Indication {
 	Socket(socket::Indication),
 	Http(http::Indication),
+	WebServ(webserv::Indication),
 }
 
 /// The set of all responses in the system. This is an enumeration of all the

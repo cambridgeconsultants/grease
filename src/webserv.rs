@@ -26,16 +26,14 @@
 // ****************************************************************************
 
 use http;
+use http::User;
+use ::GenericProvider;
 
 // ****************************************************************************
 //
-// Public Types
+// Public Messages
 //
 // ****************************************************************************
-
-/// Uniquely identifies an HTTP request received from an HTTP client.
-/// Used when sending a response to the HTTP request.
-pub type WebRequestHandle = ::Context;
 
 /// Requests that can be sent to the webserv task.
 #[derive(Debug)]
@@ -77,6 +75,16 @@ pub struct IndStatusGetReceived {
 	pub context: WebRequestHandle,
 }
 
+// ****************************************************************************
+//
+// Public Types
+//
+// ****************************************************************************
+
+/// Uniquely identifies an HTTP request received from an HTTP client.
+/// Used when sending a response to the HTTP request.
+pub type WebRequestHandle = ::Context;
+
 /// All possible webserv task errors
 #[derive(Debug, Copy, Clone)]
 pub enum Error {
@@ -103,15 +111,12 @@ pub enum Error {
 //
 // ****************************************************************************
 
-// None
-
-// ****************************************************************************
-//
-// Private Data
-//
-// ****************************************************************************
-
-// None
+struct TaskContext {
+	/// Who we send http messages to
+	http: ::MessageSender,
+	/// How other tasks send messages to us
+	reply_to: ::MessageSender,
+}
 
 // ****************************************************************************
 //
@@ -119,7 +124,13 @@ pub enum Error {
 //
 // ****************************************************************************
 
-// None
+/// Creates a new socket task. Returns an object that can be used
+/// to send this task messages.
+pub fn make_task(http: &::MessageSender) -> ::MessageSender {
+	let local_http = http.clone();
+	::make_task("webserv",
+	            move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_http))
+}
 
 // ****************************************************************************
 //
@@ -127,7 +138,106 @@ pub enum Error {
 //
 // ****************************************************************************
 
-// None
+/// The task runs this main loop indefinitely.
+fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, http: ::MessageSender) {
+	let mut t = TaskContext::new(http, tx);
+	t.init();
+	for msg in rx.iter() {
+		t.handle(msg);
+	}
+	panic!("This task should never die!");
+}
+
+/// All our handler functions are methods on this TaskContext structure.
+impl TaskContext {
+	/// Create a new TaskContext
+	fn new(http: ::MessageSender, us: ::MessageSender) -> TaskContext {
+		TaskContext {
+			http: http,
+			reply_to: us
+		}
+	}
+
+	/// Register an HTTP server
+	fn init(&mut self) {
+		let msg = http::ReqBind {
+			addr: "0.0.0.0:8000".parse().unwrap(),
+			context: 0
+		};
+		self.http.send_request(msg, &self.reply_to);
+	}
+
+	/// Handle an incoming message. It might a `Request` for us,
+	/// or it might be a `Confirmation` or `Indication` from a lower layer.
+	fn handle(&mut self, msg: ::Message) {
+		match msg {
+			// We only handle our own requests and responses
+			::Message::Request(ref reply_to, ::Request::WebServ(ref x)) => {
+				self.handle_webserv_req(x, reply_to)
+			}
+			::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
+				self.handle_generic_req(x, reply_to)
+			}
+			// We use the http task so we expect to get confirmations and indications from it
+			::Message::Confirmation(::Confirmation::Http(ref x)) => self.handle_http_cfm(x),
+			::Message::Indication(::Indication::Http(ref x)) => self.handle_http_ind(x),
+			// If we get here, someone else has made a mistake
+			_ => error!("Unexpected message in webserv task: {:?}", msg),
+		}
+	}
+
+	// Handle our own requests.
+	fn handle_webserv_req(&mut self, req: &Request, reply_to: &::MessageSender) {
+		match *req {
+			Request::SendStatusGetResult(ref x) => self.handle_webserv_sendstatusgetresult_req(x, reply_to),
+		}
+	}
+
+	fn handle_webserv_sendstatusgetresult_req(&mut self, msg: &ReqSendStatusGetResult, reply_to: &::MessageSender) {
+
+	}
+}
+
+/// Handle generic requests.
+impl GenericProvider for TaskContext {}
+
+impl http::User for TaskContext {
+	/// Called when a Bind confirmation is received.
+	fn handle_http_cfm_bind(&mut self, msg: &http::CfmBind)
+	{
+
+	}
+
+	/// Called when an ResponseStart confirmation is received.
+	fn handle_http_cfm_response_start(&mut self, msg: &http::CfmResponseStart)
+	{
+
+	}
+
+	/// Called when a ResponseBody confirmation is received.
+	fn handle_http_cfm_response_body(&mut self, msg: &http::CfmResponseBody)
+	{
+
+	}
+
+	/// Called when a ResponseClose confirmation is received.
+	fn handle_http_cfm_response_close(&mut self, msg: &http::CfmResponseClose)
+	{
+
+	}
+
+	/// Handles a Connected indication.
+	fn handle_http_ind_connected(&mut self, msg: &http::IndConnected)
+	{
+
+	}
+
+	/// Handles a connection Closed indication.
+	fn handle_http_ind_closed(&mut self, msg: &http::IndClosed)
+	{
+
+	}
+}
 
 // ****************************************************************************
 //

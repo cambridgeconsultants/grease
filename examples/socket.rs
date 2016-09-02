@@ -1,4 +1,4 @@
-//! # grease - example application
+//! # socket - a grease example using sockets
 
 // ****************************************************************************
 //
@@ -14,11 +14,12 @@ extern crate time;
 
 use std::env;
 use std::thread;
+use std::net;
 
 use env_logger::LogBuilder;
-use grease::{http, socket};
-use log::{LogRecord, LogLevelFilter};
+use grease::socket::{Indication, make_task, ReqBind, ReqSend, RspReceived};
 
+use log::{LogRecord, LogLevelFilter};
 
 // ****************************************************************************
 //
@@ -61,29 +62,19 @@ fn main() {
     }
     builder.init().unwrap();
 
-    info!("Hello, this is grease.");
-    info!("It's what you put on threads when you have rust issues...");
+    let bind_addr:net::SocketAddr = "0.0.0.0:8000".parse().unwrap();
 
-    let socket_thread = socket::make_task();
-    let http_thread = http::make_task(&socket_thread);
+    info!("Hello, this is the grease socket example.");
+    info!("Running echo server on {}", bind_addr);
+
+    let socket_thread = make_task();
     let (tx, rx) = grease::make_channel();
-
     {
-        let bind_req = http::ReqBind {
-            context: 1,
-            addr: "0.0.0.0:8000".parse().unwrap(),
-        };
-        http_thread.send_request(bind_req, &tx);
-        debug!("Got cfm for 8000 HTTP bind: {:?}", rx.recv().unwrap());
-    }
-
-    {
-        let bind_req = socket::ReqBind {
+        let bind_req = ReqBind {
             context: 2,
-            addr: "0.0.0.0:8001".parse().unwrap(),
+            addr: bind_addr,
         };
         socket_thread.send_request(bind_req, &tx);
-        debug!("Got cfm for 8001 raw socket bind: {:?}", rx.recv().unwrap());
     }
 
     let mut n: grease::Context = 0;
@@ -91,16 +82,23 @@ fn main() {
     loop {
         debug!("Sleeping...");
         let ind = rx.recv().unwrap();
-        if let grease::Message::Indication(
-            grease::Indication::Socket(
-                socket::Indication::Received(ref ind_rcv))) = ind {
-            info!("Got {} bytes of input", ind_rcv.data.len());
-            let recv_rsp = socket::RspReceived { handle: ind_rcv.handle };
-            socket_thread.send_nonrequest(recv_rsp);
-            let reply_data = ind_rcv.data.clone();
-            let send_req = socket::ReqSend { handle: ind_rcv.handle, data: reply_data, context: n };
-            socket_thread.send_request(send_req, &tx);
-            n = n + 1;
+        match ind {
+            grease::Message::Indication(grease::Indication::Socket(Indication::Received(ref ind))) => {
+                info!("Got {} bytes of input", ind.data.len());
+                let recv_rsp = RspReceived { handle: ind.handle };
+                socket_thread.send_nonrequest(recv_rsp);
+                let reply_data = ind.data.clone();
+                let send_req = ReqSend { handle: ind.handle, data: reply_data, context: n };
+                socket_thread.send_request(send_req, &tx);
+                n = n + 1;
+            }
+            grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ref ind))) => {
+                info!("Got connection from {}, handle = {}", ind.peer, ind.open_handle);
+            }
+            grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ref ind))) => {
+                info!("Connection dropped, handle = {}", ind.handle);
+            }
+            _ => { }
         }
     }
 }
