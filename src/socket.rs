@@ -21,8 +21,8 @@ use std::io;
 use std::net;
 use std::thread;
 
-use mio::prelude::*;
 use mio;
+use mio::deprecated::Handler;
 
 use ::prelude::*;
 
@@ -303,7 +303,7 @@ pub enum SocketError {
 //
 // ****************************************************************************
 
-type TaskEventLoop = EventLoop<TaskContext>;
+type TaskEventLoop = mio::deprecated::EventLoop<TaskContext>;
 
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
@@ -384,7 +384,7 @@ pub fn make_task() -> ::MessageSender {
 /// channel to the other. We don't need our own
 /// MessageSender as we don't send Requests that need replying to.
 fn main_loop(rx: ::MessageReceiver, _: ::MessageSender) {
-	let mut event_loop = mio::EventLoop::new().unwrap();
+	let mut event_loop = mio::deprecated::EventLoop::new().unwrap();
 	let ch = event_loop.channel();
 	let _ = thread::spawn(move || {
 		for msg in rx.iter() {
@@ -399,14 +399,14 @@ fn main_loop(rx: ::MessageReceiver, _: ::MessageSender) {
 /// These are our mio callbacks. They are called by the mio EventLoop
 /// when interesting things happen. We deal with the interesting thing, then
 /// the EventLoop calls another callback or waits for more interesting things.
-impl mio::Handler for TaskContext {
+impl mio::deprecated::Handler for TaskContext {
 	type Timeout = u32;
 	type Message = ::Message;
 
 	/// Called when mio has an update on a registered listener or connection
-	/// We have to check the EventSet to find out whether our socket is
+	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
-	fn ready(&mut self, event_loop: &mut TaskEventLoop, token: mio::Token, events: mio::EventSet) {
+	fn ready(&mut self, event_loop: &mut TaskEventLoop, token: mio::Token, events: mio::Ready) {
 		debug!("Ready!");
 		let handle = token.0;
 		if events.is_readable() {
@@ -442,7 +442,7 @@ impl mio::Handler for TaskContext {
 				debug!("HUP listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("HUP connected socket {}", handle);
-				// self.dropped(event_loop, handle);
+				self.dropped(event_loop, handle);
 			} else {
 				warn!("HUP on unknown token {}", handle);
 			}
@@ -497,27 +497,27 @@ impl TaskContext {
 	fn accept(&mut self, event_loop: &mut TaskEventLoop, ls_handle: ListenHandle) {
 		// We know this exists because we checked it before we got here
 		let ls = self.listeners.get(&ls_handle).unwrap();
-		if let Some(conn_addr) = ls.listener.accept().unwrap() {
+		if let Ok((stream, conn_addr)) = ls.listener.accept() {
 			let cs = ConnectedSocket {
 				// parent: ls.handle,
 				handle: self.next_open,
 				ind_to: ls.ind_to.clone(),
-				connection: conn_addr.0,
+				connection: stream,
 				outstanding: false,
 				pending_writes: VecDeque::new(),
 			};
 			self.next_open += 1;
 			match event_loop.register(&cs.connection,
 			                          mio::Token(cs.handle),
-			                          mio::EventSet::readable() | mio::EventSet::hup() |
-			                          mio::EventSet::error() |
-			                          mio::EventSet::writable(),
+			                          mio::Ready::readable() | mio::Ready::hup() |
+			                          mio::Ready::error() |
+			                          mio::Ready::writable(),
 			                          mio::PollOpt::edge()) {
 				Ok(_) => {
 					let ind = IndConnected {
 						listen_handle: ls.handle,
 						open_handle: cs.handle,
-						peer: conn_addr.1,
+						peer: conn_addr,
 					};
 					self.connections.insert(cs.handle, cs);
 					ls.ind_to.send_nonrequest(ind);
@@ -642,7 +642,7 @@ impl TaskContext {
 				};
 				match event_loop.register(&l.listener,
 				                          mio::Token(h),
-				                          mio::EventSet::readable(),
+				                          mio::Ready::readable(),
 				                          mio::PollOpt::edge()) {
 					Ok(_) => {
 						self.listeners.insert(h, l);

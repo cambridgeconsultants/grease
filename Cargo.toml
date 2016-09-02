@@ -10,6 +10,6 @@ time = "0.1"
 
 [dependencies]
 log = "0.3"
-mio = "0.5"
+mio = "0.6"
 rushttp = { git = "https://github.com/thejpster/rushttp.git" }
 multi-map = "^1.0"
