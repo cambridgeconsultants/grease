@@ -2,6 +2,7 @@
 name = "grease"
 version = "0.3.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
+readme = "README.md"
 
 [dev-dependencies]
 env_logger = "0.3"
