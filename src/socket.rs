@@ -442,7 +442,7 @@ impl mio::Handler for TaskContext {
 				debug!("HUP listen socket {}", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("HUP connected socket {}", handle);
-				self.dropped(event_loop, handle);
+				// self.dropped(event_loop, handle);
 			} else {
 				warn!("HUP on unknown token {}", handle);
 			}
