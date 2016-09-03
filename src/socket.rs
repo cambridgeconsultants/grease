@@ -170,7 +170,7 @@ pub struct CfmSend {
 	/// The handle requested for sending
 	pub handle: ConnectedHandle,
 	/// Amount sent or error
-	pub result: Result<::Context, SocketError>,
+	pub result: Result<usize, SocketError>,
 	/// Some (maybe) unique identifier
 	pub context: ::Context,
 }
@@ -387,7 +387,7 @@ fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
 	let (mio_tx, mio_rx) = mio::channel::channel();
 	let _ = thread::spawn(move || {
 		for msg in grease_rx.iter() {
-			mio_tx.send(msg).unwrap();
+			let _ = mio_tx.send(msg);
 		}
 	});
 	let mut task_context = TaskContext::new(mio_rx);
@@ -543,15 +543,16 @@ impl TaskContext {
 						debug!("Sent {} of {}, leaving {}", len, to_send, left);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
-						// No indication here - we wait some more
+						// No cfm here - we wait some more
 						break;
 					}
 					Ok(_) => {
 						debug!("Sent all {}", to_send);
+						pw.sent = pw.sent + to_send;
 						let cfm = CfmSend {
 							handle: cs.handle,
 							context: pw.context,
-							result: Ok(to_send),
+							result: Ok(pw.sent),
 						};
 						pw.reply_to.send_nonrequest(cfm);
 					}
@@ -797,11 +798,12 @@ impl Drop for ConnectedSocket {
 
 #[cfg(test)]
 mod test {
-	use super::*;
 	use std::io::prelude::*;
 	use std::net;
+	use std::sync::mpsc;
 	use rand;
 	use rand::Rng;
+	use super::*;
 
 	#[test]
 	fn make_task_and_ping() {
@@ -809,7 +811,7 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		let ping_req = ::PingReq { context: 1234 };
 		socket_thread.send_request(ping_req, &reply_to);
-		let cfm = test_rx.recv().unwrap();
+		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Generic(::GenericCfm::Ping(ref x))) => {
 				assert_eq!(x.context, 1234);
@@ -823,9 +825,12 @@ mod test {
 	fn bind_port_ok() {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
-		let bind_req = ReqBind { addr: "127.0.1.1:8000".parse().unwrap(), context: 1234 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8000".parse().unwrap(),
+			context: 1234,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let cfm = test_rx.recv().unwrap();
+		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 1234);
@@ -841,9 +846,12 @@ mod test {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 		// Shouldn't be able to bind :22 as normal user
-		let bind_req = ReqBind { addr: "127.0.1.1:22".parse().unwrap(), context: 5678 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:22".parse().unwrap(),
+			context: 5678,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let cfm = test_rx.recv().unwrap();
+		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 5678);
@@ -859,9 +867,12 @@ mod test {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 		// Shouldn't be able to bind :22 as normal user
-		let bind_req = ReqBind { addr: "8.8.8.8:8000".parse().unwrap(), context: 6666 };
+		let bind_req = ReqBind {
+			addr: "8.8.8.8:8000".parse().unwrap(),
+			context: 6666,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let cfm = test_rx.recv().unwrap();
+		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 6666);
@@ -877,9 +888,12 @@ mod test {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 
-		let bind_req = ReqBind { addr: "127.0.1.1:8001".parse().unwrap(), context: 5678 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8001".parse().unwrap(),
+			context: 5678,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let listen_handle = match test_rx.recv().unwrap() {
+		let listen_handle = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 5678);
 				x.result.unwrap()
@@ -891,7 +905,7 @@ mod test {
 		let stream = net::TcpStream::connect("127.0.1.1:8001").unwrap();
 
 		// Check we get an IndConnected
-		let connected_handle = match test_rx.recv().unwrap() {
+		let connected_handle = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
@@ -903,7 +917,7 @@ mod test {
 		stream.shutdown(net::Shutdown::Both).unwrap();
 
 		// Check we get an IndDropped
-		match test_rx.recv().unwrap() {
+		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, connected_handle);
 			}
@@ -917,9 +931,12 @@ mod test {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 
-		let bind_req = ReqBind { addr: "127.0.1.1:8002".parse().unwrap(), context: 5678 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8002".parse().unwrap(),
+			context: 5678,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let listen_handle8002 = match test_rx.recv().unwrap() {
+		let listen_handle8002 = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 5678);
 				x.result.unwrap()
@@ -927,9 +944,12 @@ mod test {
 			_ => panic!("Bad match"),
 		};
 
-		let bind_req = ReqBind { addr: "127.0.1.1:8003".parse().unwrap(), context: 5678 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8003".parse().unwrap(),
+			context: 5678,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let listen_handle8003 = match test_rx.recv().unwrap() {
+		let listen_handle8003 = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 5678);
 				x.result.unwrap()
@@ -942,7 +962,7 @@ mod test {
 		let stream8002 = net::TcpStream::connect("127.0.1.1:8002").unwrap();
 
 		// Check we get an IndConnected, twice
-		let connected_handle8003 = match test_rx.recv().unwrap() {
+		let connected_handle8003 = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8003);
 				assert_eq!(x.peer, stream8003.local_addr().unwrap());
@@ -950,7 +970,7 @@ mod test {
 			}
 			_ => panic!("Bad match"),
 		};
-		let connected_handle8002 = match test_rx.recv().unwrap() {
+		let connected_handle8002 = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8002);
 				assert_eq!(x.peer, stream8002.local_addr().unwrap());
@@ -963,7 +983,7 @@ mod test {
 		stream8002.shutdown(net::Shutdown::Both).unwrap();
 
 		// Check we get an IndDropped
-		match test_rx.recv().unwrap() {
+		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, connected_handle8002);
 			}
@@ -974,7 +994,7 @@ mod test {
 		stream8003.shutdown(net::Shutdown::Both).unwrap();
 
 		// Check we get an IndDropped
-		match test_rx.recv().unwrap() {
+		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, connected_handle8003);
 			}
@@ -988,9 +1008,12 @@ mod test {
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 
-		let bind_req = ReqBind { addr: "127.0.1.1:8004".parse().unwrap(), context: 5678 };
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8004".parse().unwrap(),
+			context: 5678,
+		};
 		socket_thread.send_request(bind_req, &reply_to);
-		let listen_handle = match test_rx.recv().unwrap() {
+		let listen_handle = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, 5678);
 				x.result.unwrap()
@@ -1002,7 +1025,7 @@ mod test {
 		let mut stream = net::TcpStream::connect("127.0.1.1:8004").unwrap();
 
 		// Check we get an IndConnected
-		let connected_handle = match test_rx.recv().unwrap() {
+		let connected_handle = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
@@ -1018,7 +1041,7 @@ mod test {
 
 		// Check we get data, in pieces of arbitrary length
 		while rx_data.len() < data.len() {
-			match test_rx.recv().unwrap() {
+			match test_rx.recv() {
 				::Message::Indication(::Indication::Socket(Indication::Received(ref x))) => {
 					assert_eq!(x.handle, connected_handle);
 					rx_data.append(&mut x.data.clone());
@@ -1033,12 +1056,100 @@ mod test {
 		stream.shutdown(net::Shutdown::Both).unwrap();
 
 		// Check we get an IndDropped
-		match test_rx.recv().unwrap() {
+		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, connected_handle);
 			}
 			_ => panic!("Bad match"),
 		};
+	}
+
+	#[test]
+	/// Uses 127.0.1.1:8005 to receive some random data
+	fn receive_data() {
+		let socket_thread = make_task();
+		let (reply_to, test_rx) = ::make_channel();
+
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8005".parse().unwrap(),
+			context: 5678,
+		};
+		socket_thread.send_request(bind_req, &reply_to);
+		let listen_handle = match test_rx.recv() {
+			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, 5678);
+				x.result.unwrap()
+			}
+			_ => panic!("Bad match"),
+		};
+
+		// Make a TCP connection
+		let mut stream = net::TcpStream::connect("127.0.1.1:8005").unwrap();
+
+		// Check we get an IndConnected
+		let connected_handle = match test_rx.recv() {
+			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+				assert_eq!(x.listen_handle, listen_handle);
+				assert_eq!(x.peer, stream.local_addr().unwrap());
+				x.connected_handle
+			}
+			_ => panic!("Bad match"),
+		};
+
+		// Send some data using the socket thread
+		let data = rand::thread_rng().gen_iter().take(1024).collect::<Vec<u8>>();
+		socket_thread.send_request(ReqSend {
+			                           handle: connected_handle,
+			                           context: 1234,
+			                           data: data.clone(),
+		                           },
+		                           &reply_to);
+
+		// Check we haven't got a cfm
+		if let Err(e) = test_rx.try_recv() {
+			assert_eq!(e, mpsc::TryRecvError::Empty);
+		} else {
+			panic!("cfm returned too early!")
+		}
+
+		// Read all the data
+		let mut rx_data = Vec::new();
+		while rx_data.len() != data.len() {
+			let mut part = [0u8; 16];
+			if stream.read(&mut part).unwrap() == 0 {
+				// We should never read zero - there should be enough
+				// data in the buffer
+				panic!("Zero read");
+			}
+			rx_data.extend_from_slice(&part);
+		}
+
+		assert_eq!(rx_data, data);
+
+		// Check we get cfm
+		match test_rx.recv() {
+			::Message::Confirmation(::Confirmation::Socket(Confirmation::Send(ref x))) => {
+				assert_eq!(x.handle, connected_handle);
+				if let Ok(len) = x.result {
+					assert_eq!(len, data.len())
+				} else {
+					panic!("Didn't get OK in CfmSend");
+				}
+				assert_eq!(x.context, 1234);
+			}
+			_ => panic!("Bad match"),
+		};
+
+		stream.shutdown(net::Shutdown::Both).unwrap();
+
+		// Check we get an IndDropped
+		match test_rx.recv() {
+			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+				assert_eq!(x.handle, connected_handle);
+			}
+			_ => panic!("Bad match"),
+		};
+
 	}
 }
 
@@ -1046,9 +1157,9 @@ mod test {
 impl fmt::Debug for IndReceived {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f,
-			   "IndReceived {{ handle: {}, data.len: {} }}",
-			   self.handle,
-			   self.data.len())
+		       "IndReceived {{ handle: {}, data.len: {} }}",
+		       self.handle,
+		       self.data.len())
 	}
 }
 
@@ -1056,9 +1167,9 @@ impl fmt::Debug for IndReceived {
 impl fmt::Debug for ReqSend {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f,
-			   "ReqSend {{ handle: {}, data.len: {} }}",
-			   self.handle,
-			   self.data.len())
+		       "ReqSend {{ handle: {}, data.len: {} }}",
+		       self.handle,
+		       self.data.len())
 	}
 }
 

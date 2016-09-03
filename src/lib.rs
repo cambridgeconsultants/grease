@@ -90,14 +90,14 @@
 /// a `ReqOpen` message.
 #[macro_export]
 macro_rules! make_request(
-    ($v:ident, $s:path, $e:path) => {
-        impl RequestSendable for $v {
-            fn wrap(self, reply_to: &::MessageSender) -> ::Message {
-                ::Message::Request(reply_to.clone(),
-                                   $s($e(Box::new(self))))
-            }
-        }
-    }
+	($v:ident, $s:path, $e:path) => {
+		impl RequestSendable for $v {
+			fn wrap(self, reply_to: &::MessageSender) -> ::Message {
+				::Message::Request(reply_to.clone(),
+								   $s($e(Box::new(self))))
+			}
+		}
+	}
 );
 
 /// Implements NonRequestSendable on the given confirmation structure.
@@ -116,13 +116,13 @@ macro_rules! make_request(
 /// representing a `CfmOpen` message.
 #[macro_export]
 macro_rules! make_confirmation(
-    ($v:ident, $s:path, $e:path) => {
-        impl NonRequestSendable for $v {
-            fn wrap(self) -> ::Message {
-                ::Message::Confirmation($s($e(Box::new(self))))
-            }
-        }
-    }
+	($v:ident, $s:path, $e:path) => {
+		impl NonRequestSendable for $v {
+			fn wrap(self) -> ::Message {
+				::Message::Confirmation($s($e(Box::new(self))))
+			}
+		}
+	}
 );
 
 /// Implements NonRequestSendable on the given indication structure.
@@ -141,13 +141,13 @@ macro_rules! make_confirmation(
 /// enum representing a `IndConnected` message.
 #[macro_export]
 macro_rules! make_indication(
-    ($v:ident, $s:path, $e:path) => {
-        impl NonRequestSendable for $v {
-            fn wrap(self) -> ::Message {
-                ::Message::Indication($s($e(Box::new(self))))
-            }
-        }
-    }
+	($v:ident, $s:path, $e:path) => {
+		impl NonRequestSendable for $v {
+			fn wrap(self) -> ::Message {
+				::Message::Indication($s($e(Box::new(self))))
+			}
+		}
+	}
 );
 
 /// Implements NonRequestSendable on the given response structure.
@@ -165,13 +165,13 @@ macro_rules! make_indication(
 /// `RspConnected` message.
 #[macro_export]
 macro_rules! make_response(
-    ($v:ident, $s:path, $e:path) => {
-        impl NonRequestSendable for $v {
-            fn wrap(self) -> ::Message {
-                ::Message::Response($s($e(Box::new(self))))
-            }
-        }
-    }
+	($v:ident, $s:path, $e:path) => {
+		impl NonRequestSendable for $v {
+			fn wrap(self) -> ::Message {
+				::Message::Response($s($e(Box::new(self))))
+			}
+		}
+	}
 );
 
 // ****************************************************************************
@@ -208,6 +208,7 @@ pub mod webserv;
 
 use std::sync::mpsc;
 use std::thread;
+// use std::time::Duration;
 
 // ****************************************************************************
 //
@@ -376,8 +377,10 @@ pub trait RequestSendable {
 ///
 /// ```
 /// fn main_loop(rx: grease::MessageReceiver, _: grease::MessageSender) {
-///     loop {
-///         let _ = rx.recv().unwrap();
+///     for msg in rx.iter() {
+///         match msg {
+/// #            _ => { }
+///         }
 ///     }
 /// }
 /// # fn main() {
@@ -457,12 +460,34 @@ impl MessageSender {
 }
 
 /// This is the 'output' end of our message pipe. It wraps up an
-/// `mpsc::Sender`, performing a bit of repetitive boilerplate code.
+/// `mpsc::Receiver`.
+// const MAX_WAIT_SECS:u64 = 10;
 impl MessageReceiver {
-	/// Useful for test code, but a task implementation should call `iter` in
-	/// preference.
-	pub fn recv(&self) -> Result<Message, mpsc::RecvError> {
-		self.0.recv()
+	// /// Receives with a timeout. Use only for tests - use `iter()` for writing
+	// /// a task. Will call panic!() if the timeout is reached.
+	// pub fn recv(&self) -> Message {
+	// 	match self.0.recv_timeout(Duration::new(MAX_WAIT_SECS, 0)) {
+	// 		Ok(msg) => msg,
+	// 		Err(mpsc::RecvTimeoutError::Timeout) => panic!("Timed out receiving message"),
+	// 		Err(mpsc::RecvTimeoutError::Disconnected) => panic!("Channel disconnected"),
+	// 	}
+	// }
+
+	/// Receives a message. Use only for tests - use `iter()` for writing
+	/// a task.
+	pub fn recv(&self) -> Message {
+		match self.0.recv() {
+			Ok(msg) => msg,
+			Err(_) => panic!("Channel disconnected"),
+		}
+	}
+
+	/// Will panic!() if the channel is not empty. Use for tests.
+	pub fn check_empty(&self) {}
+
+	/// Use for test code only
+	pub fn try_recv(&self) -> Result<Message, mpsc::TryRecvError> {
+		self.0.try_recv()
 	}
 
 	/// Allows the caller to repeatedly block on new messages.
@@ -486,7 +511,6 @@ mod tests {
 		let test_req = ::PingReq { context: 1234 };
 		tx.send_request(test_req, &tx);
 		let msg = rx.recv();
-		let msg = msg.unwrap();
 		match msg {
 			::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {
 				assert_eq!(x.context, 1234);

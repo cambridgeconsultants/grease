@@ -79,12 +79,10 @@ fn main() {
 
     let mut n: grease::Context = 0;
 
-    loop {
-        debug!("Sleeping...");
-        let ind = rx.recv().unwrap();
-        match ind {
+    for msg in rx.iter() {
+        match msg {
             grease::Message::Indication(grease::Indication::Socket(Indication::Received(ref ind))) => {
-                info!("Got {} bytes of input", ind.data.len());
+                info!("Echoing {} bytes of input", ind.data.len());
                 let recv_rsp = RspReceived { handle: ind.handle };
                 socket_thread.send_nonrequest(recv_rsp);
                 let reply_data = ind.data.clone();
