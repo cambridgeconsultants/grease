@@ -800,7 +800,6 @@ impl Drop for ConnectedSocket {
 mod test {
 	use std::io::prelude::*;
 	use std::net;
-	use std::sync::mpsc;
 	use rand;
 	use rand::Rng;
 	use super::*;
@@ -1096,6 +1095,8 @@ mod test {
 			_ => panic!("Bad match"),
 		};
 
+		test_rx.check_empty();
+
 		// Send some data using the socket thread
 		let data = rand::thread_rng().gen_iter().take(1024).collect::<Vec<u8>>();
 		socket_thread.send_request(ReqSend {
@@ -1105,12 +1106,7 @@ mod test {
 		                           },
 		                           &reply_to);
 
-		// Check we haven't got a cfm
-		if let Err(e) = test_rx.try_recv() {
-			assert_eq!(e, mpsc::TryRecvError::Empty);
-		} else {
-			panic!("cfm returned too early!")
-		}
+		test_rx.check_empty();
 
 		// Read all the data
 		let mut rx_data = Vec::new();
@@ -1149,6 +1145,8 @@ mod test {
 			}
 			_ => panic!("Bad match"),
 		};
+
+		test_rx.check_empty();
 
 	}
 }

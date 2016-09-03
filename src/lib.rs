@@ -208,7 +208,6 @@ pub mod webserv;
 
 use std::sync::mpsc;
 use std::thread;
-// use std::time::Duration;
 
 // ****************************************************************************
 //
@@ -373,7 +372,7 @@ pub trait RequestSendable {
 /// Helper function to create a new task.
 ///
 /// As tasks are supposed to live forever, we immediately detach the thread
-/// we create by dropping `JoinHandle` returned from `thread::spawn`.
+/// we create by dropping the `JoinHandle` returned from `thread::spawn`.
 ///
 /// ```
 /// fn main_loop(rx: grease::MessageReceiver, _: grease::MessageSender) {
@@ -419,7 +418,7 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
 /// of socket.
 impl Drop for Message {
 	fn drop(&mut self) {
-		debug!("** Destroyed {:?}", self);
+		debug!("** {:?}", self);
 	}
 }
 
@@ -461,20 +460,11 @@ impl MessageSender {
 
 /// This is the 'output' end of our message pipe. It wraps up an
 /// `mpsc::Receiver`.
-// const MAX_WAIT_SECS:u64 = 10;
 impl MessageReceiver {
-	// /// Receives with a timeout. Use only for tests - use `iter()` for writing
-	// /// a task. Will call panic!() if the timeout is reached.
-	// pub fn recv(&self) -> Message {
-	// 	match self.0.recv_timeout(Duration::new(MAX_WAIT_SECS, 0)) {
-	// 		Ok(msg) => msg,
-	// 		Err(mpsc::RecvTimeoutError::Timeout) => panic!("Timed out receiving message"),
-	// 		Err(mpsc::RecvTimeoutError::Disconnected) => panic!("Channel disconnected"),
-	// 	}
-	// }
-
 	/// Receives a message. Use only for tests - use `iter()` for writing
-	/// a task.
+	/// a task. This will be updated to do `recv_with_timeout()` when it
+	/// stabilises, to the avoid the possibility of your test hanging
+	/// indefinitely.
 	pub fn recv(&self) -> Message {
 		match self.0.recv() {
 			Ok(msg) => msg,
@@ -483,7 +473,13 @@ impl MessageReceiver {
 	}
 
 	/// Will panic!() if the channel is not empty. Use for tests.
-	pub fn check_empty(&self) {}
+	pub fn check_empty(&self) {
+		match self.0.try_recv() {
+			Ok(msg) => panic!("Queue should be empty, got {:?}!", msg),
+			Err(mpsc::TryRecvError::Disconnected) => panic!("Channel disconnected"),
+			Err(mpsc::TryRecvError::Empty) => {}
+		}
+	}
 
 	/// Use for test code only
 	pub fn try_recv(&self) -> Result<Message, mpsc::TryRecvError> {
