@@ -578,12 +578,12 @@ impl SocketUser for TaskContext {
 			let conn = Connection {
 				our_handle: self.get_ctx(),
 				server_handle: server_handle,
-				conn_handle: ind.open_handle,
+				conn_handle: ind.connected_handle,
 				parser: rushttp::http_request::HttpRequestParser::new(),
 			};
 			debug!("New connection {:?}, conn={:?}",
 			       conn.our_handle,
-			       ind.open_handle);
+			       ind.connected_handle);
 			self.connections.insert(conn.our_handle, conn.conn_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");

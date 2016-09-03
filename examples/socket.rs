@@ -93,7 +93,7 @@ fn main() {
                 n = n + 1;
             }
             grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ref ind))) => {
-                info!("Got connection from {}, handle = {}", ind.peer, ind.open_handle);
+                info!("Got connection from {}, handle = {}", ind.peer, ind.connected_handle);
             }
             grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ref ind))) => {
                 info!("Connection dropped, handle = {}", ind.handle);

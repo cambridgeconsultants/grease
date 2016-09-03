@@ -37,7 +37,7 @@
 //!
 //! To use grease, make sure your program/crate has:
 //!
-//! ```
+//! ```ignore
 //! use grease::prelude::*;
 //! use grease;
 //! ```
@@ -185,6 +185,8 @@ extern crate log;
 extern crate mio;
 extern crate multi_map;
 extern crate rushttp;
+#[cfg(test)]
+extern crate rand;
 
 // ****************************************************************************
 //
@@ -484,7 +486,6 @@ mod tests {
 		let test_req = ::PingReq { context: 1234 };
 		tx.send_request(test_req, &tx);
 		let msg = rx.recv();
-		println!("Got {:?}", msg);
 		let msg = msg.unwrap();
 		match msg {
 			::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {

@@ -4,7 +4,7 @@
 //!
 //! To use grease, make sure your program/crate has:
 //!
-//! ```
+//! ```ignore
 //! use grease::prelude::*;
 //! use grease;
 //! ```
