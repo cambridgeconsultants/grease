@@ -24,12 +24,12 @@
 //!
 //! After an `IndRequest` has been sent up, an `IndClosed` will be sent when
 //! the connection subsequently closes (perhaps prematurely). The user of the
-//! service should follow an `IndConnected` with a `ReqResponseStart`, zero or
-//! more `ReqResponseBody` and then a `ReqResponseClose`. For flow control it
-//! is recommended that the user waits for the `CfmResponseBody` before
-//! sending another `ReqResponseBody`. Although the socket task underneath
-//! should buffer all the data anyway, using flow control properly saves
-//! memory - especially when sending large bodies.
+//! service should follow an `IndConnected` with a `ReqResponseStart` then
+//! zero or more `ReqResponseBody`. For flow control it is recommended that
+//! the user waits for the `CfmResponseBody` before sending another
+//! `ReqResponseBody`. Although the socket task underneath should buffer all
+//! the data anyway, using flow control properly saves memory - especially
+//! when sending large bodies.
 //!
 //! TODO: We need to support an IndBody / RspBody at some point, so that
 //! POST and PUT will actually work.
@@ -49,6 +49,8 @@ use ::socket;
 use ::socket::User as SocketUser;
 use ::prelude::*;
 
+pub use rushttp::http_response::HttpResponseStatus;
+
 // ****************************************************************************
 //
 // Public Messages
@@ -64,8 +66,6 @@ pub enum Request {
 	ResponseStart(Box<ReqResponseStart>),
 	/// Send some body content for an HTTP response
 	ResponseBody(Box<ReqResponseBody>),
-	/// Close out an HTTP response
-	ResponseClose(Box<ReqResponseClose>),
 }
 
 /// Confirmations that must be sent back to the http task.
@@ -77,8 +77,6 @@ pub enum Confirmation {
 	ResponseStart(Box<CfmResponseStart>),
 	/// Confirms a ReqResponseBody has been sent
 	ResponseBody(Box<CfmResponseBody>),
-	/// Confirms the connection has been closed
-	ResponseClose(Box<CfmResponseClose>),
 }
 
 /// Indications that come out of the http task.
@@ -104,17 +102,23 @@ make_request!(ReqBind, ::Request::Http, Request::Bind);
 /// Send the headers for an HTTP response. Host, Content-Length
 /// and Content-Type are automatically added from the relevant fields
 /// but you can add arbitrary other headers in the header vector.
+///
+/// Send zero or more ReqResponseBody to fulfill the length specified.
+/// (Wait for CfmResponseBody between each one as the link might be slow).
+/// If unbounded length, send an empty ReqResponseBody to finish so we
+/// know to close the connection.
 #[derive(Debug)]
 pub struct ReqResponseStart {
 	/// Which HTTP connection to start a response on
 	pub handle: ConnHandle,
 	/// Reflected back in the cfm
 	pub context: ::Context,
-	/// Content-type for the response, e.g. "text/html"
+	/// Status code
+	pub status: HttpResponseStatus,
+	/// Content-Type for the response, e.g. "text/html"
 	pub content_type: String,
 	/// Length for the response - None means unbounded and 0 means no body.
-	/// If there's no body, then ReqResponseClose should not be sent as it's
-	/// implied.
+	/// If not Some(0), then send some ReqResponseBody next.
 	pub length: Option<usize>,
 	/// Any other headers required.
 	pub headers: HashMap<String, String>,
@@ -135,17 +139,6 @@ pub struct ReqResponseBody {
 }
 
 make_request!(ReqResponseBody, ::Request::Http, Request::ResponseBody);
-
-/// Close out an HTTP response
-#[derive(Debug)]
-pub struct ReqResponseClose {
-	/// Which HTTP connection to close
-	pub handle: ConnHandle,
-	/// Reflected back in the cfm
-	pub context: ::Context,
-}
-
-make_request!(ReqResponseClose, ::Request::Http, Request::ResponseClose);
 
 /// Whether the ReqBind was successfull
 #[derive(Debug)]
@@ -179,18 +172,6 @@ pub struct CfmResponseBody {
 make_confirmation!(CfmResponseBody,
 				   ::Confirmation::Http,
 				   Confirmation::ResponseBody);
-
-/// Confirms the connection has been closed
-#[derive(Debug)]
-pub struct CfmResponseClose {
-	pub handle: ConnHandle,
-	pub context: ::Context,
-	pub result: Result<(), Error>,
-}
-
-make_confirmation!(CfmResponseClose,
-				   ::Confirmation::Http,
-				   Confirmation::ResponseClose);
 
 /// A new HTTP request has been received
 #[derive(Debug)]
@@ -230,7 +211,6 @@ pub trait User {
 			Confirmation::Bind(ref x) => self.handle_http_cfm_bind(&x),
 			Confirmation::ResponseStart(ref x) => self.handle_http_cfm_response_start(&x),
 			Confirmation::ResponseBody(ref x) => self.handle_http_cfm_response_body(&x),
-			Confirmation::ResponseClose(ref x) => self.handle_http_cfm_response_close(&x),
 		}
 	}
 
@@ -242,9 +222,6 @@ pub trait User {
 
 	/// Called when a ResponseBody confirmation is received.
 	fn handle_http_cfm_response_body(&mut self, msg: &CfmResponseBody);
-
-	/// Called when a ResponseClose confirmation is received.
-	fn handle_http_cfm_response_close(&mut self, msg: &CfmResponseClose);
 
 	/// Handles a Http Indication by unpacking the enum and routing the
 	/// struct contained withing to the appropriate handler.
@@ -294,6 +271,19 @@ pub enum Error {
 //
 // ****************************************************************************
 
+enum CfmType {
+	Start,
+	Body,
+	Close
+}
+
+struct PendingCfm {
+	reply_to: ::MessageSender,
+	their_context: ::Context,
+	cfm_type: CfmType,
+	handle: ConnHandle,
+}
+
 struct Server {
 	/// Supplied in a `socket::CfmBind`
 	pub listen_handle: Option<socket::ListenHandle>,
@@ -313,9 +303,12 @@ struct Connection {
 	/// The server we were spawned for
 	pub server_handle: ServerHandle,
 	/// The socket handle for this specific connection
-	pub conn_handle: socket::ConnHandle,
+	pub socket_handle: socket::ConnHandle,
 	/// The parser object we feed data through
 	pub parser: rushttp::http_request::HttpRequestParser,
+	/// Cfms we haven't sent yet, indexed by the unique context ID we
+	/// send to the socket task.
+	pub pending: HashMap<::Context, PendingCfm>,
 }
 
 struct TaskContext {
@@ -404,7 +397,6 @@ impl TaskContext {
 			Request::Bind(ref x) => self.handle_bind(x, reply_to),
 			Request::ResponseStart(ref x) => self.handle_responsestart(x, reply_to),
 			Request::ResponseBody(ref x) => self.handle_responsebody(x, reply_to),
-			Request::ResponseClose(ref x) => self.handle_responseclose(x, reply_to),
 		}
 	}
 
@@ -431,6 +423,11 @@ impl TaskContext {
 	/// Get the connection from a connection handle
 	fn get_conn_by_http_handle(&mut self, handle: &ConnHandle) -> Option<&mut Connection> {
 		self.connections.get_mut(handle)
+	}
+
+	/// Remove the connection from a connection handle
+	fn remove_conn_by_http_handle(&mut self, handle: &ConnHandle) -> Option<&mut Connection> {
+		self.connections.remove(handle)
 	}
 
 	/// Get the Server for a given socket ListenHandle.
@@ -469,11 +466,47 @@ impl TaskContext {
 		self.connections.remove_alt(handle);
 	}
 
+	fn render_response(
+		status: HttpResponseStatus,
+		content_type: &str,
+		length: Option<usize>,
+		headers: &HashMap<String, String>) -> String
+	{
+		let mut s = String::new();
+		s.push(format!("HTTP/1.1 {}\r\n", status));
+		if !headers.contains("Server") {
+			s.push("Server: grease/http\r\n");
+		}
+		if !headers.contains("Content-Length") {
+			if let Some(length) = length {
+				s.push(format!("Content-Length: {}\r\n", length));
+			}
+		}
+        for (k, v) in &headers {
+            s.push(format!("{}: {}\r\n", k, v));
+		}
+		s.push("\r\n");
+		return s;
+	}
+
 	fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &::MessageSender) {
 		if let Some(conn) = self.get_conn_by_http_handle(req_start.handle) {
 			// Render the headers as a String
 			// Send to the socket server
 			// Send the cfm when the socket server has sent this data
+			let s = TaskContext::render_response(req_start.status, req_start.content_type, req_start.length, &req_start.headers);
+			let req = socket::ReqSend {
+				handle: conn.socket_handle,
+				context: self.get_ctx(),
+				data: s.to_bytes()
+			};
+			let pend = PendingCfm {
+				their_context: req_start.context,
+				reply_to: reply_to.clone(),
+				cfm_type: CfmType::Start,
+			};
+			self.pending.insert(req.context, pend);
+			self.socket.send_request(req, &self.reply_to);
 		}
 		else {
 			debug!("handle_responsestart: {:?}", req_start);
@@ -487,28 +520,12 @@ impl TaskContext {
 	}
 
 	fn handle_responsebody(&mut self, req_body: &ReqResponseBody, reply_to: &::MessageSender) {
-		// @todo this is debug. We should send an IndConnected here
-		let msg = format!("Received {} chars", len);
-		self.send_response(&ind.handle,
-						   rushttp::http_response::HttpResponseStatus::OK,
-						   &msg);
-
+		// @todo send body here
 		let cfm = CfmResponseBody {
 			context: req_body.context,
 			handle: req_body.handle,
 			result: Err(Error::Unknown),
 		};
-		reply_to.send_nonrequest(cfm);
-	}
-
-	fn handle_responseclose(&mut self, req_close: &ReqResponseClose, reply_to: &::MessageSender) {
-		let conn = self.get_conn_by_http_handle(req_close.handle);
-		let cfm = CfmResponseClose {
-			context: req_close.context,
-			handle: req_close.handle,
-			result: Ok(),
-		};
-		self.delete_connection_by_socket_handle(&ind.handle);
 		reply_to.send_nonrequest(cfm);
 	}
 
@@ -580,8 +597,38 @@ impl SocketUser for TaskContext {
 		debug!("Got {:?}", cfm);
 	}
 
+	fn map_result<T>(result: &Result<T, socket::SocketError>) -> Result<(), Error> {
+		match result {
+			Ok(_) => Ok(()),
+			Err(e) => Err(Error::SocketError(e))
+		}
+	}
+
 	fn handle_socket_cfm_send(&mut self, cfm: &socket::CfmSend) {
 		debug!("Got {:?}", cfm);
+		if let Some(pend) = self.pending.remove(cfm.context) {
+			match pend.cfm_type {
+				CfmType::Start => {
+					let msg = CfmResponseStart {
+						context: pend.context,
+						handle: pend.handle,
+						result: TaskContext::map_result(cfm.result),
+					};
+					pend.reply_to.send_nonrequest(msg);
+				}
+				CfmType::Body => {
+					let msg = CfmResponseBody {
+						context: pend.context,
+						handle: pend.handle,
+						result: TaskContext::map_result(cfm.result),
+					};
+					pend.reply_to.send_nonrequest(msg);
+				}
+				CfmType::Close => {
+					panic!("CfmSend with close context?");
+				}
+			}
+		}
 	}
 
 	/// Someone has connected to our bound socket, so create a Connection
@@ -593,13 +640,13 @@ impl SocketUser for TaskContext {
 			let conn = Connection {
 				our_handle: self.get_ctx(),
 				server_handle: server_handle,
-				conn_handle: ind.conn_handle,
+				socket_handle: ind.conn_handle,
 				parser: rushttp::http_request::HttpRequestParser::new(),
 			};
-			debug!("New connection {:?}, conn={:?}",
+			debug!("New connection {:?}, socket={:?}",
 				   conn.our_handle,
-				   ind.conn_handle);
-			self.connections.insert(conn.our_handle, conn.conn_handle, conn);
+				   conn.socket_handle);
+			self.connections.insert(conn.our_handle, conn.socket_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");
 		}
