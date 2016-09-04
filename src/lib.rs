@@ -54,20 +54,8 @@
 //! received. The task should end when the iterator terminates. The
 //! `MessageSender` is probably not useful within the task itself (unless it
 //! wishes to send itself a message) but clones are usually passed to other
-//! tasks, so they know how to respond to this task.
-//!
-//! ```ignore
-//! use grease;
-//! ...
-//! grease::make_task("foo", main_loop);
-//! ...
-//! fn main_loop(rx: grease::MessageReceiver, tx: grease::MessageSender) {
-//!     let t = TaskContext::new(tx);
-//!     for msg in rx.iter() {
-//!         t.handle(msg);
-//!     }
-//! }
-//! ```
+//! tasks, so they know how to respond to this task. See the `make_task` function
+//! for details.
 
 // ****************************************************************************
 //
@@ -253,9 +241,8 @@ pub enum Message {
 /// probably defined in that service's module.
 #[derive(Debug)]
 pub enum Request {
-	Generic(GenericReq),
-	Socket(socket::Request),
 	Http(http::Request),
+	Socket(socket::Request),
 	WebServ(webserv::Request),
 }
 
@@ -264,9 +251,8 @@ pub enum Request {
 /// that send requests - you send a request and you get a confirmation back.
 #[derive(Debug)]
 pub enum Confirmation {
-	Generic(GenericCfm),
-	Socket(socket::Confirmation),
 	Http(http::Confirmation),
+	Socket(socket::Confirmation),
 	WebServ(webserv::Confirmation),
 }
 
@@ -275,8 +261,8 @@ pub enum Confirmation {
 /// service is probably defined in that service's module.
 #[derive(Debug)]
 pub enum Indication {
-	Socket(socket::Indication),
 	Http(http::Indication),
+	Socket(socket::Indication),
 	WebServ(webserv::Indication),
 }
 
@@ -286,49 +272,6 @@ pub enum Indication {
 #[derive(Debug)]
 pub enum Response {
 	Socket(socket::Response),
-}
-
-/// Generic requests should be handled by every task.
-#[derive(Debug)]
-pub enum GenericReq {
-	Ping(Box<PingReq>),
-}
-
-/// There is exactly one `GenericCfm` for every `GenericReq`. These should be
-/// handled by every task that can ever send a `GenericReq`.
-#[derive(Debug)]
-pub enum GenericCfm {
-	Ping(Box<PingCfm>),
-}
-
-/// A simple ping - receiving task should send a `PingCfm` in reply
-#[derive(Debug)]
-pub struct PingReq {
-	/// This will be reflected in the `PingCfm` to aid message association
-	pub context: Context,
-}
-
-make_request!(PingReq, Request::Generic, GenericReq::Ping);
-
-/// Reply to a `PingReq`
-#[derive(Debug)]
-pub struct PingCfm {
-	/// This is reflected from the `PingReq` to aid message association
-	pub context: Context,
-}
-
-make_confirmation!(PingCfm, Confirmation::Generic, GenericCfm::Ping);
-
-/// Should be implemented by tasks which handle GenericReq
-pub trait GenericProvider {
-	fn handle_generic_req(&mut self, req: &GenericReq, reply_to: &MessageSender) {
-		match *req {
-			GenericReq::Ping(ref x) => {
-				let cfm = PingCfm { context: x.context };
-				reply_to.send_nonrequest(cfm);
-			}
-		}
-	}
 }
 
 /// Implementors of the NonRequestSendable trait can be easily wrapped in a
@@ -374,8 +317,13 @@ pub trait RequestSendable {
 /// As tasks are supposed to live forever, we immediately detach the thread
 /// we create by dropping the `JoinHandle` returned from `thread::spawn`.
 ///
+/// The `main_loop` argument takes two arguments: the `MessageReceiver` should
+/// be iterated to obtain messages the task needs to process, and the
+/// `MessageSender` should be passed to any other tasks that need to message
+/// this one.
+///
 /// ```
-/// fn main_loop(rx: grease::MessageReceiver, _: grease::MessageSender) {
+/// fn main_loop(rx: grease::MessageReceiver, _reply_to: grease::MessageSender) {
 ///     for msg in rx.iter() {
 ///         match msg {
 /// #            _ => { }
@@ -481,11 +429,6 @@ impl MessageReceiver {
 		}
 	}
 
-	/// Use for test code only
-	pub fn try_recv(&self) -> Result<Message, mpsc::TryRecvError> {
-		self.0.try_recv()
-	}
-
 	/// Allows the caller to repeatedly block on new messages.
 	/// Iteration ends when channel is destroyed (usually on system shutdown).
 	pub fn iter(&self) -> mpsc::Iter<Message> {
@@ -503,16 +446,8 @@ impl MessageReceiver {
 mod tests {
 	#[test]
 	fn test_make_channel() {
-		let (tx, rx) = ::make_channel();
-		let test_req = ::PingReq { context: 1234 };
-		tx.send_request(test_req, &tx);
-		let msg = rx.recv();
-		match msg {
-			::Message::Request(_, ::Request::Generic(::GenericReq::Ping(ref x))) => {
-				assert_eq!(x.context, 1234);
-			}
-			_ => panic!("Bad match"),
-		}
+		let (_tx, rx) = ::make_channel();
+		rx.check_empty();
 	}
 }
 

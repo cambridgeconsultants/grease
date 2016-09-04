@@ -4,7 +4,7 @@
 //!
 //! To use grease, make sure your program/crate has:
 //!
-//! ```ignore
+//! ```
 //! use grease::prelude::*;
 //! use grease;
 //! ```
@@ -15,7 +15,7 @@
 //
 // ****************************************************************************
 
-pub use super::{GenericProvider, NonRequestSendable, RequestSendable};
+pub use super::{NonRequestSendable, RequestSendable};
 
 // ****************************************************************************
 //

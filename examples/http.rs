@@ -1,4 +1,4 @@
-//! # socket - a grease example using sockets
+//! # http - a grease example using http and sockets
 
 // ****************************************************************************
 //
@@ -15,9 +15,11 @@ extern crate time;
 use std::env;
 use std::thread;
 use std::net;
+use std::collections::HashMap;
 
 use env_logger::LogBuilder;
-use grease::socket::{Indication, make_task, ReqBind, ReqSend, RspReceived};
+use grease::socket;
+use grease::http;
 
 use log::{LogRecord, LogLevelFilter};
 
@@ -64,37 +66,47 @@ fn main() {
 
     let bind_addr:net::SocketAddr = "0.0.0.0:8000".parse().unwrap();
 
-    info!("Hello, this is the grease socket example.");
-    info!("Running echo server on {}", bind_addr);
+    info!("Hello, this is the grease HTTP example.");
+    info!("Running HTTP server on {}", bind_addr);
 
-    let socket_thread = make_task();
+    let socket_thread = socket::make_task();
+    let http_thread = http::make_task(&socket_thread);
     let (tx, rx) = grease::make_channel();
+
     {
-        let bind_req = ReqBind {
-            context: 2,
+        let bind_req = http::ReqBind {
             addr: bind_addr,
+            context: 2,
         };
-        socket_thread.send_request(bind_req, &tx);
+        http_thread.send_request(bind_req, &tx);
     }
 
     let mut n: grease::Context = 0;
 
     for msg in rx.iter() {
         match msg {
-            grease::Message::Indication(grease::Indication::Socket(Indication::Received(ref ind))) => {
-                info!("Echoing {} bytes of input", ind.data.len());
-                let recv_rsp = RspReceived { handle: ind.handle };
-                socket_thread.send_nonrequest(recv_rsp);
-                let reply_data = ind.data.clone();
-                let send_req = ReqSend { handle: ind.handle, data: reply_data, context: n };
-                socket_thread.send_request(send_req, &tx);
+            grease::Message::Indication(grease::Indication::Http(http::Indication::Connected(ref ind))) => {
+                info!("Got HTTP request {:?} {}", ind.method, ind.url);
+                let start = http::ReqResponseStart {
+                    handle: ind.connection_handle,
+                    context: n,
+                    content_type: String::from("text/plain"),
+                    length: None,
+                    headers: HashMap::new()
+                };
+                http_thread.send_request(start, &tx);
+                let body = http::ReqResponseBody {
+                    handle: ind.connection_handle,
+                    context: n,
+                    data: String::from("This is a test!\r\n").into_bytes()
+                };
+                http_thread.send_request(body, &tx);
+                let close = http::ReqResponseClose {
+                    handle: ind.connection_handle,
+                    context: n,
+                };
+                http_thread.send_request(close, &tx);
                 n = n + 1;
-            }
-            grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ref ind))) => {
-                info!("Got connection from {}, handle = {}", ind.peer, ind.conn_handle);
-            }
-            grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ref ind))) => {
-                info!("Connection dropped, handle = {}", ind.handle);
             }
             _ => { }
         }

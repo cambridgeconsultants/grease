@@ -95,7 +95,7 @@ make_request!(ReqBind, ::Request::Socket, Request::Bind);
 #[derive(Debug)]
 pub struct ReqUnbind {
 	/// The handle from a CfmBind
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// Reflected in the cfm
 	pub context: ::Context,
 }
@@ -106,7 +106,7 @@ make_request!(ReqUnbind, ::Request::Socket, Request::Unbind);
 #[derive(Debug)]
 pub struct ReqClose {
 	/// The handle from a IndConnected
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// Reflected in the cfm
 	pub context: ::Context,
 }
@@ -116,7 +116,7 @@ make_request!(ReqClose, ::Request::Socket, Request::Close);
 /// Send something on a connection
 pub struct ReqSend {
 	/// The handle from a CfmBind
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// Some (maybe) unique identifier
 	pub context: ::Context,
 	/// The data to be sent
@@ -154,7 +154,7 @@ make_confirmation!(CfmUnbind, ::Confirmation::Socket, Confirmation::Unbind);
 #[derive(Debug)]
 pub struct CfmClose {
 	/// The handle requested for closing
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// Success or failed
 	pub result: Result<(), SocketError>,
 	/// Reflected from the req
@@ -168,7 +168,7 @@ make_confirmation!(CfmClose, ::Confirmation::Socket, Confirmation::Close);
 #[derive(Debug)]
 pub struct CfmSend {
 	/// The handle requested for sending
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// Amount sent or error
 	pub result: Result<usize, SocketError>,
 	/// Some (maybe) unique identifier
@@ -183,7 +183,7 @@ pub struct IndConnected {
 	/// The listen handle the connection came in on
 	pub listen_handle: ListenHandle,
 	/// The handle for the new connection
-	pub connected_handle: ConnectedHandle,
+	pub conn_handle: ConnHandle,
 	/// Details about who connected
 	pub peer: net::SocketAddr,
 }
@@ -194,7 +194,7 @@ make_indication!(IndConnected, ::Indication::Socket, Indication::Connected);
 #[derive(Debug)]
 pub struct IndDropped {
 	/// The handle that is no longer valid
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 }
 
 make_indication!(IndDropped, ::Indication::Socket, Indication::Dropped);
@@ -206,7 +206,7 @@ make_indication!(IndDropped, ::Indication::Socket, Indication::Dropped);
 /// doesn't print the (lengthy) contents of `data`.
 pub struct IndReceived {
 	/// The handle for the socket data came in on
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 	/// The data that came in (might be a limited to a small amount)
 	pub data: Vec<u8>,
 }
@@ -217,7 +217,7 @@ make_indication!(IndReceived, ::Indication::Socket, Indication::Received);
 #[derive(Debug)]
 pub struct RspReceived {
 	/// Which handle is now free to send up more data
-	pub handle: ConnectedHandle,
+	pub handle: ConnHandle,
 }
 
 make_response!(RspReceived, ::Response::Socket, Response::Received);
@@ -280,7 +280,7 @@ pub trait User {
 pub type ListenHandle = ::Context;
 
 /// Uniquely identifies an open socket
-pub type ConnectedHandle = ::Context;
+pub type ConnHandle = ::Context;
 
 /// All possible errors the Socket task might want to
 /// report.
@@ -321,7 +321,7 @@ struct PendingWrite {
 struct ConnectedSocket {
 	// parent: ListenHandle,
 	ind_to: ::MessageSender,
-	handle: ConnectedHandle,
+	handle: ConnHandle,
 	connection: mio::tcp::TcpStream,
 	/// There's a read the user hasn't process yet
 	outstanding: bool,
@@ -334,7 +334,7 @@ struct TaskContext {
 	/// Set of all bound sockets
 	listeners: HashMap<ListenHandle, ListenSocket>,
 	/// Set of all connected sockets
-	connections: HashMap<ConnectedHandle, ConnectedSocket>,
+	connections: HashMap<ConnHandle, ConnectedSocket>,
 	/// The next handle we'll use for a bound/open socket
 	next_handle: ::Context,
 	/// The special channel our messages arrive on
@@ -400,7 +400,7 @@ impl TaskContext {
 	fn poll(&mut self) {
 		let mut events = mio::Events::with_capacity(1024);
 		let num_events = self.poll.poll(&mut events, None).unwrap();
-		warn!("Woke up! num_events={}", num_events);
+		trace!("Woke up! Handling num_events={}", num_events);
 		for event in events.iter() {
 			self.ready(event.token(), event.kind())
 		}
@@ -448,7 +448,7 @@ impl TaskContext {
 		}
 		if ready.is_hup() {
 			if self.listeners.contains_key(&handle) {
-				debug!("HUP listen socket {}", handle);
+				warn!("HUP listen socket {} is not handled.", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("HUP connected socket {}", handle);
 				self.dropped(handle);
@@ -459,16 +459,13 @@ impl TaskContext {
 		debug!("Ready is done");
 	}
 
-	/// Called when mio (i.e. our task) has received a Message
+	/// Called when our task has received a Message
 	fn handle_message(&mut self, msg: ::Message) {
 		debug!("Notify!");
 		match msg {
 			// We only handle our own requests and responses
 			::Message::Request(ref reply_to, ::Request::Socket(ref x)) => {
 				self.handle_socket_req(x, reply_to)
-			}
-			::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
-				self.handle_generic_req(x, reply_to)
 			}
 			::Message::Response(::Response::Socket(ref x)) => self.handle_socket_rsp(x),
 			// We don't expect any Indications or Confirmations from other providers
@@ -520,7 +517,7 @@ impl TaskContext {
 				.unwrap();
 			let ind = IndConnected {
 				listen_handle: ls.handle,
-				connected_handle: cs.handle,
+				conn_handle: cs.handle,
 				peer: conn_addr,
 			};
 			self.connections.insert(cs.handle, cs);
@@ -531,7 +528,7 @@ impl TaskContext {
 	}
 
 	/// Data can be sent a connected socket. Send what we have
-	fn pending_writes(&mut self, cs_handle: ConnectedHandle) {
+	fn pending_writes(&mut self, cs_handle: ConnHandle) {
 		// We know this exists because we checked it before we got here
 		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
 		loop {
@@ -574,7 +571,7 @@ impl TaskContext {
 	}
 
 	/// Data is available on a connected socket. Pass it up
-	fn read(&mut self, cs_handle: ConnectedHandle) {
+	fn read(&mut self, cs_handle: ConnHandle) {
 		debug!("Reading connection {}", cs_handle);
 		// We know this exists because we checked it before we got here
 		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
@@ -604,7 +601,7 @@ impl TaskContext {
 	}
 
 	/// Connection has gone away. Clean up.
-	fn dropped(&mut self, cs_handle: ConnectedHandle) {
+	fn dropped(&mut self, cs_handle: ConnHandle) {
 		// We know this exists because we checked it before we got here
 		let cs = self.connections.remove(&cs_handle).unwrap();
 		self.poll.deregister(&cs.connection).unwrap();
@@ -781,8 +778,6 @@ impl TaskContext {
 	}
 }
 
-impl GenericProvider for TaskContext {}
-
 impl Drop for ConnectedSocket {
 	fn drop(&mut self) {
 		for pw in self.pending_writes.iter() {
@@ -803,21 +798,6 @@ mod test {
 	use rand;
 	use rand::Rng;
 	use super::*;
-
-	#[test]
-	fn make_task_and_ping() {
-		let socket_thread = make_task();
-		let (reply_to, test_rx) = ::make_channel();
-		let ping_req = ::PingReq { context: 1234 };
-		socket_thread.send_request(ping_req, &reply_to);
-		let cfm = test_rx.recv();
-		match cfm {
-			::Message::Confirmation(::Confirmation::Generic(::GenericCfm::Ping(ref x))) => {
-				assert_eq!(x.context, 1234);
-			}
-			_ => panic!("Bad match"),
-		}
-	}
 
 	#[test]
 	/// Binds 127.0.1.1:8000
@@ -904,11 +884,11 @@ mod test {
 		let stream = net::TcpStream::connect("127.0.1.1:8001").unwrap();
 
 		// Check we get an IndConnected
-		let connected_handle = match test_rx.recv() {
+		let conn_handle = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
-				x.connected_handle
+				x.conn_handle
 			}
 			_ => panic!("Bad match"),
 		};
@@ -918,7 +898,7 @@ mod test {
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
-				assert_eq!(x.handle, connected_handle);
+				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
 		};
@@ -961,19 +941,19 @@ mod test {
 		let stream8002 = net::TcpStream::connect("127.0.1.1:8002").unwrap();
 
 		// Check we get an IndConnected, twice
-		let connected_handle8003 = match test_rx.recv() {
+		let conn_handle8003 = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8003);
 				assert_eq!(x.peer, stream8003.local_addr().unwrap());
-				x.connected_handle
+				x.conn_handle
 			}
 			_ => panic!("Bad match"),
 		};
-		let connected_handle8002 = match test_rx.recv() {
+		let conn_handle8002 = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8002);
 				assert_eq!(x.peer, stream8002.local_addr().unwrap());
-				x.connected_handle
+				x.conn_handle
 			}
 			_ => panic!("Bad match"),
 		};
@@ -984,7 +964,7 @@ mod test {
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
-				assert_eq!(x.handle, connected_handle8002);
+				assert_eq!(x.handle, conn_handle8002);
 			}
 			_ => panic!("Bad match"),
 		};
@@ -995,7 +975,7 @@ mod test {
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
-				assert_eq!(x.handle, connected_handle8003);
+				assert_eq!(x.handle, conn_handle8003);
 			}
 			_ => panic!("Bad match"),
 		};
@@ -1024,11 +1004,11 @@ mod test {
 		let mut stream = net::TcpStream::connect("127.0.1.1:8004").unwrap();
 
 		// Check we get an IndConnected
-		let connected_handle = match test_rx.recv() {
+		let conn_handle = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
-				x.connected_handle
+				x.conn_handle
 			}
 			_ => panic!("Bad match"),
 		};
@@ -1042,7 +1022,7 @@ mod test {
 		while rx_data.len() < data.len() {
 			match test_rx.recv() {
 				::Message::Indication(::Indication::Socket(Indication::Received(ref x))) => {
-					assert_eq!(x.handle, connected_handle);
+					assert_eq!(x.handle, conn_handle);
 					rx_data.append(&mut x.data.clone());
 					socket_thread.send_nonrequest(RspReceived { handle: x.handle });
 				}
@@ -1057,7 +1037,7 @@ mod test {
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
-				assert_eq!(x.handle, connected_handle);
+				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
 		};
@@ -1086,11 +1066,11 @@ mod test {
 		let mut stream = net::TcpStream::connect("127.0.1.1:8005").unwrap();
 
 		// Check we get an IndConnected
-		let connected_handle = match test_rx.recv() {
+		let conn_handle = match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
-				x.connected_handle
+				x.conn_handle
 			}
 			_ => panic!("Bad match"),
 		};
@@ -1100,7 +1080,7 @@ mod test {
 		// Send some data using the socket thread
 		let data = rand::thread_rng().gen_iter().take(1024).collect::<Vec<u8>>();
 		socket_thread.send_request(ReqSend {
-			                           handle: connected_handle,
+			                           handle: conn_handle,
 			                           context: 1234,
 			                           data: data.clone(),
 		                           },
@@ -1125,7 +1105,7 @@ mod test {
 		// Check we get cfm
 		match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Send(ref x))) => {
-				assert_eq!(x.handle, connected_handle);
+				assert_eq!(x.handle, conn_handle);
 				if let Ok(len) = x.result {
 					assert_eq!(len, data.len())
 				} else {
@@ -1141,7 +1121,7 @@ mod test {
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
-				assert_eq!(x.handle, connected_handle);
+				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
 		};

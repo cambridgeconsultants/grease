@@ -27,7 +27,6 @@
 
 use http;
 use http::User;
-use ::GenericProvider;
 
 // ****************************************************************************
 //
@@ -175,9 +174,6 @@ impl TaskContext {
 			::Message::Request(ref reply_to, ::Request::WebServ(ref x)) => {
 				self.handle_webserv_req(x, reply_to)
 			}
-			::Message::Request(ref reply_to, ::Request::Generic(ref x)) => {
-				self.handle_generic_req(x, reply_to)
-			}
 			// We use the http task so we expect to get confirmations and indications from it
 			::Message::Confirmation(::Confirmation::Http(ref x)) => self.handle_http_cfm(x),
 			::Message::Indication(::Indication::Http(ref x)) => self.handle_http_ind(x),
@@ -201,9 +197,6 @@ impl TaskContext {
 
 	}
 }
-
-/// Handle generic requests.
-impl GenericProvider for TaskContext {}
 
 impl http::User for TaskContext {
 	/// Called when a Bind confirmation is received.
