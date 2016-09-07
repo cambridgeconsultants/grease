@@ -158,8 +158,8 @@ pub struct CfmResponseStart {
 }
 
 make_confirmation!(CfmResponseStart,
-				   ::Confirmation::Http,
-				   Confirmation::ResponseStart);
+                   ::Confirmation::Http,
+                   Confirmation::ResponseStart);
 
 /// Confirms a ReqResponseBody has been sent
 #[derive(Debug)]
@@ -170,8 +170,8 @@ pub struct CfmResponseBody {
 }
 
 make_confirmation!(CfmResponseBody,
-				   ::Confirmation::Http,
-				   Confirmation::ResponseBody);
+                   ::Confirmation::Http,
+                   Confirmation::ResponseBody);
 
 /// A new HTTP request has been received
 #[derive(Debug)]
@@ -274,41 +274,41 @@ pub enum Error {
 enum CfmType {
 	Start,
 	Body,
-	Close
+	Close,
 }
 
+/// If we get a Request from above and consequently need to wait
+/// for a Cfm from the socket task, use a PendingCfm to store
+/// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
 	reply_to: ::MessageSender,
-	their_context: ::Context,
+	context: ::Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
 }
 
 struct Server {
 	/// Supplied in a `socket::CfmBind`
-	pub listen_handle: Option<socket::ListenHandle>,
+	listen_handle: Option<socket::ListenHandle>,
 	/// For reference, which socket address this is on
-	pub addr: net::SocketAddr,
+	addr: net::SocketAddr,
 	/// To whom we need to acknowledge the bind/unbind
-	pub reply_ctx: Option<::ReplyContext>,
+	reply_ctx: Option<::ReplyContext>,
 	/// The handle by which the upper layer refers to us
-	pub our_handle: ServerHandle,
+	our_handle: ServerHandle,
 	/// Who to tell about the new connections we get
-	pub ind_to: ::MessageSender,
+	ind_to: ::MessageSender,
 }
 
 struct Connection {
 	/// The handle by which the upper layer refers to us
-	pub our_handle: ConnHandle,
+	our_handle: ConnHandle,
 	/// The server we were spawned for
-	pub server_handle: ServerHandle,
+	server_handle: ServerHandle,
 	/// The socket handle for this specific connection
-	pub socket_handle: socket::ConnHandle,
+	socket_handle: socket::ConnHandle,
 	/// The parser object we feed data through
-	pub parser: rushttp::http_request::HttpRequestParser,
-	/// Cfms we haven't sent yet, indexed by the unique context ID we
-	/// send to the socket task.
-	pub pending: HashMap<::Context, PendingCfm>,
+	parser: rushttp::http_request::HttpRequestParser,
 }
 
 struct TaskContext {
@@ -322,6 +322,9 @@ struct TaskContext {
 	connections: MultiMap<ConnHandle, socket::ConnHandle, Connection>,
 	/// The next context we use for downward messages
 	next_ctx: ::Context,
+	/// Cfms we haven't sent yet, indexed by the unique context ID we
+	/// send to the socket task.
+	pending: HashMap<::Context, PendingCfm>,
 }
 
 // ****************************************************************************
@@ -335,7 +338,7 @@ struct TaskContext {
 pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
 	let local_socket = socket.clone();
 	::make_task("http",
-				move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_socket))
+	            move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_socket))
 }
 
 // ****************************************************************************
@@ -364,6 +367,7 @@ impl TaskContext {
 			reply_to: us,
 			// This number is arbitrary
 			next_ctx: 2_000,
+			pending: HashMap::new(),
 		}
 	}
 
@@ -426,14 +430,14 @@ impl TaskContext {
 	}
 
 	/// Remove the connection from a connection handle
-	fn remove_conn_by_http_handle(&mut self, handle: &ConnHandle) -> Option<&mut Connection> {
+	fn remove_conn_by_http_handle(&mut self, handle: &ConnHandle) -> Option<Connection> {
 		self.connections.remove(handle)
 	}
 
 	/// Get the Server for a given socket ListenHandle.
 	fn get_server_by_socket_handle(&mut self,
-								   handle: &socket::ListenHandle)
-								   -> Option<&mut Server> {
+	                               handle: &socket::ListenHandle)
+	                               -> Option<&mut Server> {
 		// The key here is Option<socket::ListenHandle> because
 		// it takes time to bind the socket.
 		self.servers.get_mut_alt(&Some(*handle))
@@ -442,8 +446,8 @@ impl TaskContext {
 	/// Get the ServerHandle for a given socket ListenHandle. Used when
 	/// we get a socket IndConnected.
 	fn get_server_handle_by_socket_handle(&mut self,
-										  handle: &socket::ListenHandle)
-										  -> Option<ServerHandle> {
+	                                      handle: &socket::ListenHandle)
+	                                      -> Option<ServerHandle> {
 		self.get_server_by_socket_handle(handle).and_then(|x| Some(x.our_handle))
 	}
 
@@ -451,8 +455,8 @@ impl TaskContext {
 	/// associated Server object. If one or the other isn't found, return
 	/// None.
 	fn get_conn_by_socket_handle(&mut self,
-								 handle: &socket::ConnHandle)
-								 -> Option<(&mut Connection, &mut Server)> {
+	                             handle: &socket::ConnHandle)
+	                             -> Option<(&mut Connection, &mut Server)> {
 		let c = self.connections.get_mut_alt(handle);
 		if let Some(conn) = c {
 			if let Some(serv) = self.servers.get_mut(&conn.server_handle) {
@@ -466,49 +470,52 @@ impl TaskContext {
 		self.connections.remove_alt(handle);
 	}
 
-	fn render_response(
-		status: HttpResponseStatus,
-		content_type: &str,
-		length: Option<usize>,
-		headers: &HashMap<String, String>) -> String
-	{
+	fn render_response(status: HttpResponseStatus,
+	                   content_type: &str,
+	                   length: Option<usize>,
+	                   headers: &HashMap<String, String>)
+	                   -> String {
 		let mut s = String::new();
-		s.push(format!("HTTP/1.1 {}\r\n", status));
-		if !headers.contains("Server") {
-			s.push("Server: grease/http\r\n");
+		s.push_str(&format!("HTTP/1.1 {}\r\n", status));
+		if !headers.contains_key("Server") {
+			s.push_str("Server: grease/http\r\n");
 		}
-		if !headers.contains("Content-Length") {
+		if !headers.contains_key("Content-Length") {
 			if let Some(length) = length {
-				s.push(format!("Content-Length: {}\r\n", length));
+				s.push_str(&format!("Content-Length: {}\r\n", length));
 			}
 		}
-        for (k, v) in &headers {
-            s.push(format!("{}: {}\r\n", k, v));
+		for (k, v) in headers.iter() {
+			s.push_str(&format!("{}: {}\r\n", k, v));
 		}
-		s.push("\r\n");
+		s.push_str("\r\n");
 		return s;
 	}
 
+	/// @todo We should we check they call this once and only once.
 	fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &::MessageSender) {
-		if let Some(conn) = self.get_conn_by_http_handle(req_start.handle) {
+		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
 			// Render the headers as a String
 			// Send to the socket server
 			// Send the cfm when the socket server has sent this data
-			let s = TaskContext::render_response(req_start.status, req_start.content_type, req_start.length, &req_start.headers);
+			let s = TaskContext::render_response(req_start.status,
+			                                     &req_start.content_type,
+			                                     req_start.length,
+			                                     &req_start.headers);
 			let req = socket::ReqSend {
-				handle: conn.socket_handle,
+				handle: req_start.handle,
 				context: self.get_ctx(),
-				data: s.to_bytes()
+				data: s.into_bytes(),
 			};
 			let pend = PendingCfm {
-				their_context: req_start.context,
+				handle: req_start.handle,
+				context: req_start.context,
 				reply_to: reply_to.clone(),
 				cfm_type: CfmType::Start,
 			};
 			self.pending.insert(req.context, pend);
 			self.socket.send_request(req, &self.reply_to);
-		}
-		else {
+		} else {
 			debug!("handle_responsestart: {:?}", req_start);
 			let cfm = CfmResponseStart {
 				context: req_start.context,
@@ -530,9 +537,9 @@ impl TaskContext {
 	}
 
 	fn send_response(&self,
-					 handle: &socket::ConnHandle,
-					 code: rushttp::http_response::HttpResponseStatus,
-					 message: &str) {
+	                 handle: &socket::ConnHandle,
+	                 code: rushttp::http_response::HttpResponseStatus,
+	                 message: &str) {
 		// An error occured which we must tell them about
 		let mut r = rushttp::http_response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
 		r.add_header("Content-Type", "text/plain");
@@ -553,6 +560,13 @@ impl TaskContext {
 			context: 0,
 		};
 		self.socket.send_request(close_req, &self.reply_to);
+	}
+
+	fn map_result<T>(result: Result<T, socket::SocketError>) -> Result<(), Error> {
+		match result {
+			Ok(_) => Ok(()),
+			Err(e) => Err(Error::SocketError(e)),
+		}
 	}
 }
 
@@ -597,16 +611,9 @@ impl SocketUser for TaskContext {
 		debug!("Got {:?}", cfm);
 	}
 
-	fn map_result<T>(result: &Result<T, socket::SocketError>) -> Result<(), Error> {
-		match result {
-			Ok(_) => Ok(()),
-			Err(e) => Err(Error::SocketError(e))
-		}
-	}
-
 	fn handle_socket_cfm_send(&mut self, cfm: &socket::CfmSend) {
 		debug!("Got {:?}", cfm);
-		if let Some(pend) = self.pending.remove(cfm.context) {
+		if let Some(pend) = self.pending.remove(&cfm.context) {
 			match pend.cfm_type {
 				CfmType::Start => {
 					let msg = CfmResponseStart {
@@ -644,8 +651,8 @@ impl SocketUser for TaskContext {
 				parser: rushttp::http_request::HttpRequestParser::new(),
 			};
 			debug!("New connection {:?}, socket={:?}",
-				   conn.our_handle,
-				   conn.socket_handle);
+			       conn.our_handle,
+			       conn.socket_handle);
 			self.connections.insert(conn.our_handle, conn.socket_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");
@@ -662,9 +669,9 @@ impl SocketUser for TaskContext {
 			debug!("Got data for conn {:?}!", conn.our_handle);
 			// Extract the fields from
 			Some((conn.parser.parse(&ind.data),
-				  conn.our_handle,
-				  conn.server_handle,
-				  serv.ind_to.clone()))
+			      conn.our_handle,
+			      conn.server_handle,
+			      serv.ind_to.clone()))
 		} else {
 			None
 		};
@@ -687,8 +694,8 @@ impl SocketUser for TaskContext {
 			Some(_) => {
 				self.delete_connection_by_socket_handle(&ind.handle);
 				self.send_response(&ind.handle,
-								   rushttp::http_response::HttpResponseStatus::BadRequest,
-								   "Bad Request");
+				                   rushttp::http_response::HttpResponseStatus::BadRequest,
+				                   "Bad Request");
 			}
 			None => {
 				warn!("Data on non-existant socket handle");

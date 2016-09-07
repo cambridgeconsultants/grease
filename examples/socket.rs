@@ -55,7 +55,7 @@ use log::{LogRecord, LogLevelFilter};
 fn main() {
     // Initialise the logging with a custom logger
     let mut builder = LogBuilder::new();
-    builder.format(format).filter(None, LogLevelFilter::Info);
+    builder.format(format).filter(None, LogLevelFilter::Debug);
     if env::var("RUST_LOG").is_ok() {
         // Allow environment variable override
         builder.parse(&env::var("RUST_LOG").unwrap());
