@@ -57,7 +57,7 @@ use log::{LogRecord, LogLevelFilter};
 fn main() {
     // Initialise the logging with a custom logger
     let mut builder = LogBuilder::new();
-    builder.format(format).filter(None, LogLevelFilter::Info);
+    builder.format(format).filter(None, LogLevelFilter::Debug);
     if env::var("RUST_LOG").is_ok() {
         // Allow environment variable override
         builder.parse(&env::var("RUST_LOG").unwrap());
@@ -88,6 +88,7 @@ fn main() {
             grease::Message::Indication(grease::Indication::Http(http::Indication::Connected(ref ind))) => {
                 info!("Got HTTP request {:?} {}", ind.method, ind.url);
                 let start = http::ReqResponseStart {
+                    status: http::HttpResponseStatus::OK,
                     handle: ind.connection_handle,
                     context: n,
                     content_type: String::from("text/plain"),
@@ -101,11 +102,12 @@ fn main() {
                     data: String::from("This is a test!\r\n").into_bytes()
                 };
                 http_thread.send_request(body, &tx);
-                let close = http::ReqResponseClose {
+                let body = http::ReqResponseBody {
                     handle: ind.connection_handle,
                     context: n,
+                    data: Vec::new()
                 };
-                http_thread.send_request(close, &tx);
+                http_thread.send_request(body, &tx);
                 n = n + 1;
             }
             _ => { }

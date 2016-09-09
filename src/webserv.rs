@@ -208,9 +208,6 @@ impl http::User for TaskContext {
 	/// Called when a ResponseBody confirmation is received.
 	fn handle_http_cfm_response_body(&mut self, msg: &http::CfmResponseBody) {}
 
-	/// Called when a ResponseClose confirmation is received.
-	fn handle_http_cfm_response_close(&mut self, msg: &http::CfmResponseClose) {}
-
 	/// Handles a Connected indication.
 	fn handle_http_ind_connected(&mut self, msg: &http::IndConnected) {}
 
