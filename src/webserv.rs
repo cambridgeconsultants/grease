@@ -192,27 +192,27 @@ impl TaskContext {
 	}
 
 	fn handle_webserv_sendstatusgetresult_req(&mut self,
-	                                          msg: &ReqSendStatusGetResult,
-	                                          reply_to: &::MessageSender) {
+	                                          _msg: &ReqSendStatusGetResult,
+	                                          _reply_to: &::MessageSender) {
 
 	}
 }
 
 impl http::User for TaskContext {
 	/// Called when a Bind confirmation is received.
-	fn handle_http_cfm_bind(&mut self, msg: &http::CfmBind) {}
+	fn handle_http_cfm_bind(&mut self, _msg: &http::CfmBind) {}
 
 	/// Called when an ResponseStart confirmation is received.
-	fn handle_http_cfm_response_start(&mut self, msg: &http::CfmResponseStart) {}
+	fn handle_http_cfm_response_start(&mut self, _msg: &http::CfmResponseStart) {}
 
 	/// Called when a ResponseBody confirmation is received.
-	fn handle_http_cfm_response_body(&mut self, msg: &http::CfmResponseBody) {}
+	fn handle_http_cfm_response_body(&mut self, _msg: &http::CfmResponseBody) {}
 
 	/// Handles a Connected indication.
-	fn handle_http_ind_connected(&mut self, msg: &http::IndConnected) {}
+	fn handle_http_ind_connected(&mut self, _msg: &http::IndConnected) {}
 
 	/// Handles a connection Closed indication.
-	fn handle_http_ind_closed(&mut self, msg: &http::IndClosed) {}
+	fn handle_http_ind_closed(&mut self, _msg: &http::IndClosed) {}
 }
 
 // ****************************************************************************
