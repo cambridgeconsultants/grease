@@ -705,6 +705,52 @@ impl SocketUser for TaskContext {
 	}
 }
 
+#[cfg(test)]
+mod test {
+	use super::*;
+	use socket;
+
+	fn bind_port(this_thread: &::MessageSender,
+	             test_rx: &::MessageReceiver,
+	             http_thread: &::MessageSender) {
+		let addr = "127.0.1.1:8000".parse().unwrap();
+		let bind_req = ReqBind {
+			addr: addr,
+			context: 1234,
+		};
+		http_thread.send_request(bind_req, &this_thread);
+		let cfm = test_rx.recv();
+		match cfm {
+			::Message::Request(ref reply_to, ::Request::Socket(socket::Request::Bind(ref x))) => {
+				assert_eq!(x.addr, addr);
+				let bind_cfm = socket::CfmBind {
+					result: Ok(1_000_000),
+					context: x.context,
+				};
+				reply_to.send_nonrequest(bind_cfm);
+			}
+			_ => panic!("Bad match"),
+		}
+		let cfm = test_rx.recv();
+		match cfm {
+			::Message::Confirmation(::Confirmation::Http(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, 1234);
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Bad match"),
+		}
+	}
+
+	#[test]
+	/// Binds 127.0.1.1:8000
+	fn bind_port_ok() {
+		let (reply_to, test_rx) = ::make_channel();
+		// Use ourselves as the 'socket' task
+		let http_thread = make_task(&reply_to);
+		bind_port(&reply_to, &test_rx, &http_thread);
+	}
+}
+
 // ****************************************************************************
 //
 // End Of File
