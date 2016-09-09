@@ -92,20 +92,14 @@ fn main() {
                     handle: ind.connection_handle,
                     context: n,
                     content_type: String::from("text/plain"),
-                    length: None,
+                    length: Some(17),
                     headers: HashMap::new()
                 };
                 http_thread.send_request(start, &tx);
                 let body = http::ReqResponseBody {
                     handle: ind.connection_handle,
                     context: n,
-                    data: String::from("This is a test!\r\n").into_bytes()
-                };
-                http_thread.send_request(body, &tx);
-                let body = http::ReqResponseBody {
-                    handle: ind.connection_handle,
-                    context: n,
-                    data: Vec::new()
+                    data: Vec::from("This is a test!\r\n")
                 };
                 http_thread.send_request(body, &tx);
                 n = n + 1;
