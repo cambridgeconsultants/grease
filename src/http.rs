@@ -274,7 +274,6 @@ pub enum Error {
 enum CfmType {
 	Start,
 	Body,
-	Close
 }
 
 struct PendingCfm {
@@ -282,6 +281,9 @@ struct PendingCfm {
 	their_context: ::Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
+	/// If true, close the socket when this cfm comes in
+	/// When the socket CfmClose comes in, send IndClosed.
+	close_after: bool
 }
 
 struct Server {
@@ -623,9 +625,6 @@ impl SocketUser for TaskContext {
 						result: TaskContext::map_result(cfm.result),
 					};
 					pend.reply_to.send_nonrequest(msg);
-				}
-				CfmType::Close => {
-					panic!("CfmSend with close context?");
 				}
 			}
 		}
