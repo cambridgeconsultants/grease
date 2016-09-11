@@ -80,6 +80,7 @@ fn main() {
     let mut n: grease::Context = 0;
 
     for msg in rx.iter() {
+        grease::MessageReceiver::render(&msg);
         match msg {
             grease::Message::Indication(grease::Indication::Socket(Indication::Received(ref ind))) => {
                 info!("Echoing {} bytes of input", ind.data.len());

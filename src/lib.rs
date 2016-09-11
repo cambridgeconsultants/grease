@@ -366,7 +366,7 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
 /// of socket.
 impl Drop for Message {
 	fn drop(&mut self) {
-		debug!("** {:?}", self);
+		// debug!("** {:?}", self);
 	}
 }
 
@@ -433,6 +433,10 @@ impl MessageReceiver {
 	/// Iteration ends when channel is destroyed (usually on system shutdown).
 	pub fn iter(&self) -> mpsc::Iter<Message> {
 		self.0.iter()
+	}
+
+	pub fn render(msg: &Message) {
+		debug!("** {:?}", msg);
 	}
 }
 

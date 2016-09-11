@@ -387,6 +387,7 @@ fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
 	let (mio_tx, mio_rx) = mio::channel::channel();
 	let _ = thread::spawn(move || {
 		for msg in grease_rx.iter() {
+			::MessageReceiver::render(&msg);
 			let _ = mio_tx.send(msg);
 		}
 	});
@@ -414,8 +415,14 @@ impl TaskContext {
 		let handle = token.0;
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
-				let msg = self.mio_rx.try_recv().unwrap();
-				self.handle_message(msg);
+				loop {
+					// Empty the whole message queue
+					if let Ok(msg) = self.mio_rx.try_recv() {
+						self.handle_message(msg);
+					} else {
+						break;
+					}
+				}
 			} else if self.listeners.contains_key(&handle) {
 				debug!("Readable listen socket {}?", handle);
 				self.accept(handle)
@@ -461,7 +468,7 @@ impl TaskContext {
 
 	/// Called when our task has received a Message
 	fn handle_message(&mut self, msg: ::Message) {
-		debug!("Notify!");
+		debug!("Notify! with {:?}", msg);
 		match msg {
 			// We only handle our own requests and responses
 			::Message::Request(ref reply_to, ::Request::Socket(ref x)) => {

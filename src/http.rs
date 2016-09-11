@@ -157,9 +157,7 @@ pub struct CfmResponseStart {
 	pub result: Result<(), Error>,
 }
 
-make_confirmation!(CfmResponseStart,
-                   ::Confirmation::Http,
-                   Confirmation::ResponseStart);
+make_confirmation!(CfmResponseStart, ::Confirmation::Http, Confirmation::ResponseStart);
 
 /// Confirms a ReqResponseBody has been sent
 #[derive(Debug)]
@@ -169,9 +167,7 @@ pub struct CfmResponseBody {
 	pub result: Result<(), Error>,
 }
 
-make_confirmation!(CfmResponseBody,
-                   ::Confirmation::Http,
-                   Confirmation::ResponseBody);
+make_confirmation!(CfmResponseBody, ::Confirmation::Http, Confirmation::ResponseBody);
 
 /// A new HTTP request has been received
 #[derive(Debug)]
@@ -357,6 +353,7 @@ pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
 fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, socket: ::MessageSender) {
 	let mut t = TaskContext::new(socket, tx);
 	for msg in rx.iter() {
+		::MessageReceiver::render(&msg);
 		t.handle(msg);
 	}
 	panic!("This task should never die!");
@@ -780,8 +777,8 @@ impl SocketUser for TaskContext {
 				body_length: None,
 			};
 			debug!("New connection {:?}, socket={:?}",
-			       conn.our_handle,
-			       conn.socket_handle);
+				   conn.our_handle,
+				   conn.socket_handle);
 			self.connections.insert(conn.our_handle, conn.socket_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");
@@ -832,6 +829,7 @@ impl SocketUser for TaskContext {
 			}
 		}
 
+		self.socket.send_nonrequest(socket::RspReceived { handle: ind.handle });
 	}
 }
 
@@ -1109,8 +1107,8 @@ mod test {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, 5);
-				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: 24\r\nContent-Type: \
-				               text/plain\r\nX-Magic: frobbins\r\n\r\n"
+				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
+				               24\r\nContent-Type: text/plain\r\nX-Magic: frobbins\r\n\r\n"
 					.as_bytes();
 				println!("Headers: {:?}", String::from_utf8(x.data.clone()));
 				assert_eq!(x.data, headers);

@@ -142,6 +142,7 @@ fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, http: ::MessageSender) 
 	let mut t = TaskContext::new(http, tx);
 	t.init();
 	for msg in rx.iter() {
+		::MessageReceiver::render(&msg);
 		t.handle(msg);
 	}
 	panic!("This task should never die!");
