@@ -421,6 +421,7 @@ impl TaskContext {
 		let req = socket::ReqBind {
 			addr: req_bind.addr,
 			context: server.our_handle,
+			conn_type: socket::ConnectionType::Stream,
 		};
 		self.socket.send_request(req, &self.reply_to);
 		self.servers.insert(server.our_handle, None, server);

@@ -83,6 +83,8 @@ pub struct ReqBind {
 	pub addr: net::SocketAddr,
 	/// Reflected in the cfm
 	pub context: ::Context,
+	/// Type of connection to bind
+	pub conn_type: ConnectionType
 }
 
 make_request!(ReqBind, ::Request::Socket, Request::Bind);
@@ -262,6 +264,15 @@ pub enum SocketError {
 	Dropped,
 	/// Function not implemented yet
 	NotImplemented,
+}
+
+/// The sort of connections we can make.
+#[derive(Debug, Copy, Clone)]
+pub enum ConnectionType {
+	/// Stream, aka a TCP connection
+	Stream,
+	/// Datagram, aka a UDP connection
+	Datagram,
 }
 
 // ****************************************************************************
@@ -608,7 +619,14 @@ impl TaskContext {
 
 	/// Open a new socket with the given parameters.
 	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
-		info!("Binding {}...", req_bind.addr);
+		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
+		match req_bind.conn_type {
+			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
+			ConnectionType::Datagram => panic!("Datagrams not supported yet"),
+		}
+	}
+
+	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
 				let h = self.next_handle;
@@ -783,6 +801,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8000".parse().unwrap(),
 			context: 1234,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
@@ -804,6 +823,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:22".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
@@ -825,6 +845,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "8.8.8.8:8000".parse().unwrap(),
 			context: 6666,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
@@ -846,6 +867,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8001".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
@@ -889,6 +911,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8002".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8002 = match test_rx.recv() {
@@ -902,6 +925,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8003".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8003 = match test_rx.recv() {
@@ -966,6 +990,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8004".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
@@ -1028,6 +1053,7 @@ mod test {
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8005".parse().unwrap(),
 			context: 5678,
+			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {

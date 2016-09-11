@@ -17,7 +17,7 @@ use std::thread;
 use std::net;
 
 use env_logger::LogBuilder;
-use grease::socket::{Indication, make_task, ReqBind, ReqSend, RspReceived};
+use grease::socket::*;
 
 use log::{LogRecord, LogLevelFilter};
 
@@ -73,6 +73,7 @@ fn main() {
         let bind_req = ReqBind {
             context: 2,
             addr: bind_addr,
+            conn_type: ConnectionType::Stream,
         };
         socket_thread.send_request(bind_req, &tx);
     }
