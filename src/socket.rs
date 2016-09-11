@@ -411,7 +411,7 @@ impl TaskContext {
 	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
 	fn ready(&mut self, token: mio::Token, ready: mio::Ready) {
-		debug!("ready={:?}, token={:?}!", ready, token);
+		debug!("ready: {:?}, token: {:?}", ready, token);
 		let handle = token.0;
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
@@ -541,14 +541,14 @@ impl TaskContext {
 				match cs.connection.write(&pw.data[pw.sent..]) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {} pending, leaving {} on ch={}", len, to_send, left, cs.handle);
+						debug!("Sent {} of {} pending, leaving {} on handle: {}", len, to_send, left, cs.handle);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
 						// No cfm here - we wait some more
 						break;
 					}
 					Ok(_) => {
-						debug!("Sent all {} pending on ch={}", to_send, cs.handle);
+						debug!("Sent all {} pending on handle: {}", to_send, cs.handle);
 						pw.sent = pw.sent + to_send;
 						let cfm = CfmSend {
 							handle: cs.handle,
@@ -558,7 +558,7 @@ impl TaskContext {
 						pw.reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error on ch={} (pending): {}", cs.handle, err);
+						warn!("Send error on handle: {} (pending), err: {}", cs.handle, err);
 						let cfm = CfmSend {
 							handle: cs.handle,
 							context: pw.context,
@@ -585,10 +585,10 @@ impl TaskContext {
 			let mut buffer = vec![0u8; MAX_READ_LEN];
 			match cs.connection.read(buffer.as_mut_slice()) {
 				Ok(0) => {
-					debug!("Read nothing");
+					debug!("Read nothing on handle: {}", cs_handle);
 				}
 				Ok(len) => {
-					debug!("Read {} octets", len);
+					debug!("Read {} octets on handle: {}", len, cs_handle);
 					let _ = buffer.split_off(len);
 					let ind = IndReceived {
 						handle: cs.handle,
@@ -600,7 +600,7 @@ impl TaskContext {
 				Err(_) => {}
 			}
 		} else {
-			debug!("Not reading - outstanding ind")
+			debug!("Not reading - outstanding ind on handle: {}", cs_handle)
 		}
 	}
 
@@ -615,7 +615,6 @@ impl TaskContext {
 
 	/// Handle requests
 	pub fn handle_socket_req(&mut self, req: &Request, reply_to: &::MessageSender) {
-		debug!("request: {:?}", req);
 		match *req {
 			Request::Bind(ref x) => self.handle_bind(x, reply_to),
 			Request::Unbind(ref x) => self.handle_unbind(x, reply_to),
@@ -631,7 +630,7 @@ impl TaskContext {
 			Ok(server) => {
 				let h = self.next_handle;
 				self.next_handle += 1;
-				debug!("Allocated listen handle {}", h);
+				debug!("Allocated listen handle: {}", h);
 				let l = ListenSocket {
 					handle: h,
 					// We assume any future indications should be sent
@@ -642,7 +641,7 @@ impl TaskContext {
 				match self.poll.register(&l.listener,
 				                         mio::Token(h),
 				                         mio::Ready::readable(),
-				                         mio::PollOpt::edge()) {
+				                         mio::PollOpt::level()) {
 					Ok(_) => {
 						self.listeners.insert(h, l);
 						CfmBind {
@@ -703,7 +702,7 @@ impl TaskContext {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
 			if cs.pending_writes.len() > 0 {
-				debug!("Storing write len {}", to_send);
+				debug!("Storing write len {} on handle: {}", to_send, req_send.handle);
 				let pw = PendingWrite {
 					sent: 0,
 					context: req_send.context,
@@ -716,7 +715,7 @@ impl TaskContext {
 				match cs.connection.write(&req_send.data) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {}, leaving {} on ch={}", len, to_send, left, cs.handle);
+						debug!("Sent {} of {}, leaving {} on handle: {}", len, to_send, left, cs.handle);
 						let pw = PendingWrite {
 							sent: len,
 							context: req_send.context,
@@ -727,7 +726,7 @@ impl TaskContext {
 						// No cfm here - we wait
 					}
 					Ok(_) => {
-						debug!("Sent all {} on ch={}", to_send, cs.handle);
+						debug!("Sent all {} on handle: {}", to_send, cs.handle);
 						let cfm = CfmSend {
 							context: req_send.context,
 							handle: req_send.handle,
@@ -736,7 +735,7 @@ impl TaskContext {
 						reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error on ch={}: {}", cs.handle, err);
+						warn!("Send error on handle: {}, err: {}", cs.handle, err);
 						let cfm = CfmSend {
 							context: req_send.context,
 							handle: req_send.handle,
