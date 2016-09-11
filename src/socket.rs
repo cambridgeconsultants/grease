@@ -1,4 +1,4 @@
-//! # socket - A TCP server task
+//! # socket - A TCP/UDP socket server task
 //!
 //! The grease socket task makes handling sockets easier. A user requests the
 //! socket task opens a new socket and it does so (if possible). The user then
@@ -38,8 +38,6 @@ use ::prelude::*;
 pub enum Request {
 	/// A Bind Request - Bind a listen socket
 	Bind(Box<ReqBind>),
-	/// An Unbind Request - Unbind a bound listen socket
-	Unbind(Box<ReqUnbind>),
 	/// A Close request - Close an open connection
 	Close(Box<ReqClose>),
 	/// A Send request - Send something on a connection
@@ -51,8 +49,6 @@ pub enum Request {
 pub enum Confirmation {
 	/// A Bind Confirm - Bound a listen socket
 	Bind(Box<CfmBind>),
-	/// An Unbind Confirm - Unbound a bound listen socket
-	Unbind(Box<CfmUnbind>),
 	/// A Close Confirm - Closed an open connection
 	Close(Box<CfmClose>),
 	/// A Send Confirm - Sent something on a connection
@@ -91,17 +87,6 @@ pub struct ReqBind {
 
 make_request!(ReqBind, ::Request::Socket, Request::Bind);
 
-/// Unbind a bound listen socket
-#[derive(Debug)]
-pub struct ReqUnbind {
-	/// The handle from a CfmBind
-	pub handle: ConnHandle,
-	/// Reflected in the cfm
-	pub context: ::Context,
-}
-
-make_request!(ReqUnbind, ::Request::Socket, Request::Unbind);
-
 /// Close an open connection
 #[derive(Debug)]
 pub struct ReqClose {
@@ -135,19 +120,6 @@ pub struct CfmBind {
 }
 
 make_confirmation!(CfmBind, ::Confirmation::Socket, Confirmation::Bind);
-
-/// Reply to a ReqUnbind.
-#[derive(Debug)]
-pub struct CfmUnbind {
-	/// The handle requested for unbinding
-	pub handle: ListenHandle,
-	/// Whether we were successful in unbinding
-	pub result: Result<(), SocketError>,
-	/// Reflected from the req
-	pub context: ::Context,
-}
-
-make_confirmation!(CfmUnbind, ::Confirmation::Socket, Confirmation::Unbind);
 
 /// Reply to a ReqClose. Will flush out all
 /// existing data.
@@ -238,7 +210,6 @@ pub trait User {
 	fn handle_socket_cfm(&mut self, msg: &Confirmation) {
 		match *msg {
 			Confirmation::Bind(ref x) => self.handle_socket_cfm_bind(&x),
-			Confirmation::Unbind(ref x) => self.handle_socket_cfm_unbind(&x),
 			Confirmation::Close(ref x) => self.handle_socket_cfm_close(&x),
 			Confirmation::Send(ref x) => self.handle_socket_cfm_send(&x),
 		}
@@ -246,9 +217,6 @@ pub trait User {
 
 	/// Called when a Bind confirmation is received.
 	fn handle_socket_cfm_bind(&mut self, msg: &CfmBind);
-
-	/// Called when an Unbind confirmation is received.
-	fn handle_socket_cfm_unbind(&mut self, msg: &CfmUnbind);
 
 	/// Called when a Close confirmation is received.
 	fn handle_socket_cfm_close(&mut self, msg: &CfmClose);
@@ -633,7 +601,6 @@ impl TaskContext {
 	pub fn handle_socket_req(&mut self, req: Request, reply_to: &::MessageSender) {
 		match req {
 			Request::Bind(x) => self.handle_bind(*x, reply_to),
-			Request::Unbind(x) => self.handle_unbind(*x, reply_to),
 			Request::Close(x) => self.handle_close(*x, reply_to),
 			Request::Send(x) => self.handle_send(*x, reply_to),
 		}
@@ -679,16 +646,6 @@ impl TaskContext {
 					context: req_bind.context,
 				}
 			}
-		};
-		reply_to.send_nonrequest(cfm);
-	}
-
-	/// Handle a ReqUnbind.
-	fn handle_unbind(&mut self, req_unbind: ReqUnbind, reply_to: &::MessageSender) {
-		let cfm = CfmClose {
-			result: Err(SocketError::NotImplemented),
-			handle: req_unbind.handle,
-			context: req_unbind.context,
 		};
 		reply_to.send_nonrequest(cfm);
 	}

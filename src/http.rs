@@ -684,10 +684,6 @@ impl SocketUser for TaskContext {
 		}
 	}
 
-	fn handle_socket_cfm_unbind(&mut self, cfm: &socket::CfmUnbind) {
-		debug!("Got {:?}", cfm);
-	}
-
 	fn handle_socket_cfm_close(&mut self, cfm: &socket::CfmClose) {
 		debug!("Got {:?}", cfm);
 		if let Some(pend) = self.pending.remove(&cfm.context) {
