@@ -463,12 +463,10 @@ impl TaskContext {
 				warn!("HUP on unknown token {}", handle);
 			}
 		}
-		debug!("Ready is done");
 	}
 
 	/// Called when our task has received a Message
 	fn handle_message(&mut self, msg: ::Message) {
-		debug!("Notify! with {:?}", msg);
 		match msg {
 			// We only handle our own requests and responses
 			::Message::Request(ref reply_to, ::Request::Socket(ref x)) => {
@@ -479,7 +477,6 @@ impl TaskContext {
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in socket task: {:?}", msg),
 		}
-		debug!("Notify is done");
 	}
 
 	/// Init the context
@@ -544,14 +541,14 @@ impl TaskContext {
 				match cs.connection.write(&pw.data[pw.sent..]) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {}, leaving {}", len, to_send, left);
+						debug!("Sent {} of {} pending, leaving {} on ch={}", len, to_send, left, cs.handle);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
 						// No cfm here - we wait some more
 						break;
 					}
 					Ok(_) => {
-						debug!("Sent all {}", to_send);
+						debug!("Sent all {} pending on ch={}", to_send, cs.handle);
 						pw.sent = pw.sent + to_send;
 						let cfm = CfmSend {
 							handle: cs.handle,
@@ -561,7 +558,7 @@ impl TaskContext {
 						pw.reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error: {}", err);
+						warn!("Send error on ch={} (pending): {}", cs.handle, err);
 						let cfm = CfmSend {
 							handle: cs.handle,
 							context: pw.context,
@@ -719,7 +716,7 @@ impl TaskContext {
 				match cs.connection.write(&req_send.data) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {}, leaving {}", len, to_send, left);
+						debug!("Sent {} of {}, leaving {} on ch={}", len, to_send, left, cs.handle);
 						let pw = PendingWrite {
 							sent: len,
 							context: req_send.context,
@@ -730,7 +727,7 @@ impl TaskContext {
 						// No cfm here - we wait
 					}
 					Ok(_) => {
-						debug!("Sent all {}", to_send);
+						debug!("Sent all {} on ch={}", to_send, cs.handle);
 						let cfm = CfmSend {
 							context: req_send.context,
 							handle: req_send.handle,
@@ -739,7 +736,7 @@ impl TaskContext {
 						reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error: {}", err);
+						warn!("Send error on ch={}: {}", cs.handle, err);
 						let cfm = CfmSend {
 							context: req_send.context,
 							handle: req_send.handle,
