@@ -82,19 +82,18 @@ fn main() {
     for msg in rx.iter() {
         grease::MessageReceiver::render(&msg);
         match msg {
-            grease::Message::Indication(grease::Indication::Socket(Indication::Received(ref ind))) => {
+            grease::Message::Indication(grease::Indication::Socket(Indication::Received(ind))) => {
                 info!("Echoing {} bytes of input", ind.data.len());
                 let recv_rsp = RspReceived { handle: ind.handle };
                 socket_thread.send_nonrequest(recv_rsp);
-                let reply_data = ind.data.clone();
-                let send_req = ReqSend { handle: ind.handle, data: reply_data, context: n };
+                let send_req = ReqSend { handle: ind.handle, data: ind.data, context: n };
                 socket_thread.send_request(send_req, &tx);
                 n = n + 1;
             }
-            grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ref ind))) => {
+            grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ind))) => {
                 info!("Got connection from {}, handle = {}", ind.peer, ind.conn_handle);
             }
-            grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ref ind))) => {
+            grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ind))) => {
                 info!("Connection dropped, handle = {}", ind.handle);
             }
             _ => { }

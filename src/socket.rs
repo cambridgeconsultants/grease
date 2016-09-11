@@ -387,7 +387,6 @@ fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
 	let (mio_tx, mio_rx) = mio::channel::channel();
 	let _ = thread::spawn(move || {
 		for msg in grease_rx.iter() {
-			::MessageReceiver::render(&msg);
 			let _ = mio_tx.send(msg);
 		}
 	});
@@ -418,6 +417,7 @@ impl TaskContext {
 				loop {
 					// Empty the whole message queue
 					if let Ok(msg) = self.mio_rx.try_recv() {
+						::MessageReceiver::render(&msg);
 						self.handle_message(msg);
 					} else {
 						break;
@@ -428,7 +428,7 @@ impl TaskContext {
 				self.accept(handle)
 			} else if self.connections.contains_key(&handle) {
 				debug!("Readable connected socket {}", handle);
-				self.read(handle)
+				self.read(handle, true)
 			} else {
 				warn!("Readable on unknown token {}", handle);
 			}
@@ -440,7 +440,8 @@ impl TaskContext {
 				debug!("Writable connected socket {}", handle);
 				self.pending_writes(handle);
 			} else {
-				warn!("Writable on unknown token {}", handle);
+				// Probably just closed
+				debug!("Writable on unknown token {}", handle);
 			}
 		}
 		if ready.is_error() {
@@ -450,7 +451,8 @@ impl TaskContext {
 				debug!("Error connected socket {}", handle);
 				self.dropped(handle);
 			} else {
-				warn!("Error on unknown token {}", handle);
+				// Probably just closed
+				debug!("Error on unknown token {}", handle);
 			}
 		}
 		if ready.is_hup() {
@@ -458,9 +460,9 @@ impl TaskContext {
 				warn!("HUP listen socket {} is not handled.", handle);
 			} else if self.connections.contains_key(&handle) {
 				debug!("HUP connected socket {}", handle);
-				self.dropped(handle);
 			} else {
-				warn!("HUP on unknown token {}", handle);
+				// Probably just closed
+				debug!("HUP on unknown token {}", handle);
 			}
 		}
 	}
@@ -469,10 +471,10 @@ impl TaskContext {
 	fn handle_message(&mut self, msg: ::Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(ref reply_to, ::Request::Socket(ref x)) => {
-				self.handle_socket_req(x, reply_to)
+			::Message::Request(reply_to, ::Request::Socket(x)) => {
+				self.handle_socket_req(x, &reply_to)
 			}
-			::Message::Response(::Response::Socket(ref x)) => self.handle_socket_rsp(x),
+			::Message::Response(::Response::Socket(x)) => self.handle_socket_rsp(x),
 			// We don't expect any Indications or Confirmations from other providers
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in socket task: {:?}", msg),
@@ -575,32 +577,46 @@ impl TaskContext {
 	}
 
 	/// Data is available on a connected socket. Pass it up
-	fn read(&mut self, cs_handle: ConnHandle) {
+	fn read(&mut self, cs_handle: ConnHandle, was_ready: bool) {
 		debug!("Reading connection {}", cs_handle);
-		// We know this exists because we checked it before we got here
-		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
-		// Only pass up one indication at a time
-		if !cs.outstanding {
-			// Cap the max amount we will read
-			let mut buffer = vec![0u8; MAX_READ_LEN];
-			match cs.connection.read(buffer.as_mut_slice()) {
-				Ok(0) => {
-					debug!("Read nothing on handle: {}", cs_handle);
+		let mut need_close = false;
+		{
+			// We know this exists because we checked it before we got here
+			let mut cs = self.connections.get_mut(&cs_handle).unwrap();
+			// Only pass up one indication at a time
+			if !cs.outstanding {
+				// Cap the max amount we will read
+				let mut buffer = vec![0u8; MAX_READ_LEN];
+				match cs.connection.read(buffer.as_mut_slice()) {
+					Ok(0) => {
+						debug!("Read nothing on handle: {}", cs_handle);
+						// Reading zero bytes after a POLLIN means connection is closed
+						// See http://www.greenend.org.uk/rjk/tech/poll.html
+						// But don't close if this is speculative
+						need_close = was_ready;
+					}
+					Ok(len) => {
+						debug!("Read {} octets on handle: {}", len, cs_handle);
+						let _ = buffer.split_off(len);
+						let ind = IndReceived {
+							handle: cs.handle,
+							data: buffer,
+						};
+						cs.outstanding = true;
+						cs.ind_to.send_nonrequest(ind);
+					}
+					Err(e) => {
+						debug!("Got \"{}\" reading on handle: {}", e, cs_handle);
+						// Don't close if this is speculative
+						need_close = was_ready;
+					}
 				}
-				Ok(len) => {
-					debug!("Read {} octets on handle: {}", len, cs_handle);
-					let _ = buffer.split_off(len);
-					let ind = IndReceived {
-						handle: cs.handle,
-						data: buffer,
-					};
-					cs.outstanding = true;
-					cs.ind_to.send_nonrequest(ind);
-				}
-				Err(_) => {}
+			} else {
+				debug!("Not reading - outstanding ind on handle: {}", cs_handle)
 			}
-		} else {
-			debug!("Not reading - outstanding ind on handle: {}", cs_handle)
+		}
+		if need_close {
+			self.dropped(cs_handle);
 		}
 	}
 
@@ -614,17 +630,17 @@ impl TaskContext {
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self, req: &Request, reply_to: &::MessageSender) {
-		match *req {
-			Request::Bind(ref x) => self.handle_bind(x, reply_to),
-			Request::Unbind(ref x) => self.handle_unbind(x, reply_to),
-			Request::Close(ref x) => self.handle_close(x, reply_to),
-			Request::Send(ref x) => self.handle_send(x, reply_to),
+	pub fn handle_socket_req(&mut self, req: Request, reply_to: &::MessageSender) {
+		match req {
+			Request::Bind(x) => self.handle_bind(*x, reply_to),
+			Request::Unbind(x) => self.handle_unbind(*x, reply_to),
+			Request::Close(x) => self.handle_close(*x, reply_to),
+			Request::Send(x) => self.handle_send(*x, reply_to),
 		}
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self, req_bind: &ReqBind, reply_to: &::MessageSender) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
 		info!("Binding {}...", req_bind.addr);
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
@@ -668,7 +684,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqUnbind.
-	fn handle_unbind(&mut self, req_unbind: &ReqUnbind, reply_to: &::MessageSender) {
+	fn handle_unbind(&mut self, req_unbind: ReqUnbind, reply_to: &::MessageSender) {
 		let cfm = CfmClose {
 			result: Err(SocketError::NotImplemented),
 			handle: req_unbind.handle,
@@ -678,7 +694,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self, req_close: &ReqClose, reply_to: &::MessageSender) {
+	fn handle_close(&mut self, req_close: ReqClose, reply_to: &::MessageSender) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -697,7 +713,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self, req_send: &ReqSend, reply_to: &::MessageSender) {
+	fn handle_send(&mut self, req_send: ReqSend, reply_to: &::MessageSender) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -706,7 +722,7 @@ impl TaskContext {
 				let pw = PendingWrite {
 					sent: 0,
 					context: req_send.context,
-					data: req_send.data.clone(),
+					data: req_send.data,
 					reply_to: reply_to.clone(),
 				};
 				cs.pending_writes.push_back(pw);
@@ -719,7 +735,7 @@ impl TaskContext {
 						let pw = PendingWrite {
 							sent: len,
 							context: req_send.context,
-							data: req_send.data.clone(),
+							data: req_send.data,
 							reply_to: reply_to.clone(),
 						};
 						cs.pending_writes.push_back(pw);
@@ -756,14 +772,14 @@ impl TaskContext {
 	}
 
 	/// Handle responses
-	pub fn handle_socket_rsp(&mut self, rsp: &Response) {
-		match *rsp {
-			Response::Received(ref x) => self.handle_received(x),
+	pub fn handle_socket_rsp(&mut self, rsp: Response) {
+		match rsp {
+			Response::Received(x) => self.handle_received(*x),
 		}
 	}
 
 	/// Someone wants more data
-	fn handle_received(&mut self, rsp_received: &RspReceived) {
+	fn handle_received(&mut self, rsp_received: RspReceived) {
 		let mut need_read = false;
 		// Read response handle might not be valid - it might
 		// have crossed over with a disconnect.
@@ -776,7 +792,7 @@ impl TaskContext {
 		}
 		if need_read {
 			// Try and read it - won't hurt if we can't.
-			self.read(rsp_received.handle)
+			self.read(rsp_received.handle, false)
 		}
 	}
 }

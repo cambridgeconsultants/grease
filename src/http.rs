@@ -13,18 +13,18 @@
 //! When a `ReqBind` is received, it attempts to bind a new socket with the
 //! socket task. If that succeeds, a new Server object is created.
 //!
-//! When an `IndConnected` is received from the socket task, we create a new
+//! When an `IndRxRequest` is received from the socket task, we create a new
 //! `Connection` object, which contains a parser (amongst other things). When
 //! data is received on the socket, it's passed to the parser and then we
 //! respond to the socket task to unblock the socket and allow more data in.
 //! Once the parser is satisfied, we can check the decoded HTTP request
-//! against our registered Server objects and pass up an `IndConnected` if
+//! against our registered Server objects and pass up an `IndRxRequest` if
 //! appropriate (or reject the request with an HTTP error response if we don't
 //! like it).
 //!
 //! After an `IndRequest` has been sent up, an `IndClosed` will be sent when
 //! the connection subsequently closes (perhaps prematurely). The user of the
-//! service should follow an `IndConnected` with a `ReqResponseStart` then
+//! service should follow an `IndRxRequest` with a `ReqResponseStart` then
 //! zero or more `ReqResponseBody`. For flow control it is recommended that
 //! the user waits for the `CfmResponseBody` before sending another
 //! `ReqResponseBody`. Although the socket task underneath should buffer all
@@ -83,7 +83,7 @@ pub enum Confirmation {
 #[derive(Debug)]
 pub enum Indication {
 	/// A new HTTP request has been received
-	Connected(Box<IndConnected>),
+	RxRequest(Box<IndRxRequest>),
 	/// An HTTP connection has been dropped
 	Closed(Box<IndClosed>),
 }
@@ -93,7 +93,7 @@ pub enum Indication {
 pub struct ReqBind {
 	/// Which address to bind.
 	pub addr: net::SocketAddr,
-	/// Reflected back in the cfm, and in subsequent IndConnected
+	/// Reflected back in the cfm, and in subsequent IndRxRequest
 	pub context: ::Context,
 }
 
@@ -171,7 +171,7 @@ make_confirmation!(CfmResponseBody, ::Confirmation::Http, Confirmation::Response
 
 /// A new HTTP request has been received
 #[derive(Debug)]
-pub struct IndConnected {
+pub struct IndRxRequest {
 	pub server_handle: ServerHandle,
 	pub connection_handle: ConnHandle,
 	pub url: String,
@@ -179,7 +179,7 @@ pub struct IndConnected {
 	pub headers: HashMap<String, String>,
 }
 
-make_indication!(IndConnected, ::Indication::Http, Indication::Connected);
+make_indication!(IndRxRequest, ::Indication::Http, Indication::RxRequest);
 
 /// An HTTP connection has been dropped
 #[derive(Debug)]
@@ -223,13 +223,13 @@ pub trait User {
 	/// struct contained withing to the appropriate handler.
 	fn handle_http_ind(&mut self, msg: &Indication) {
 		match *msg {
-			Indication::Connected(ref x) => self.handle_http_ind_connected(&x),
+			Indication::RxRequest(ref x) => self.handle_http_ind_connected(&x),
 			Indication::Closed(ref x) => self.handle_http_ind_closed(&x),
 		}
 	}
 
-	/// Handles a Connected indication.
-	fn handle_http_ind_connected(&mut self, msg: &IndConnected);
+	/// Handles a RxRequest indication.
+	fn handle_http_ind_connected(&mut self, msg: &IndRxRequest);
 
 	/// Handles a connection Closed indication.
 	fn handle_http_ind_closed(&mut self, msg: &IndClosed);
@@ -320,7 +320,7 @@ struct TaskContext {
 	reply_to: ::MessageSender,
 	/// Our list of servers, indexed by the handle given in CfmBind
 	servers: MultiMap<ServerHandle, Option<socket::ListenHandle>, Server>,
-	/// Our list of connections, indexed by the handle given in IndConnected
+	/// Our list of connections, indexed by the handle given in IndRxRequest
 	connections: MultiMap<ConnHandle, socket::ConnHandle, Connection>,
 	/// The next context we use for downward messages
 	next_ctx: ::Context,
@@ -806,7 +806,7 @@ impl SocketUser for TaskContext {
 		match r {
 			Some((rushttp::http_request::ParseResult::Complete(req, _), ch, sh, ind_to)) => {
 				// All done!
-				let conn_ind = IndConnected {
+				let conn_ind = IndRxRequest {
 					server_handle: sh,
 					connection_handle: ch,
 					url: req.url,
@@ -863,7 +863,7 @@ mod test {
 				};
 				reply_to.send_nonrequest(bind_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", cfm),
 		}
 		let cfm = test_rx.recv();
 		match cfm {
@@ -875,7 +875,7 @@ mod test {
 					panic!("HTTP Bind failed");
 				}
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", cfm),
 		}
 	}
 
@@ -913,7 +913,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::Indication::Http(Indication::Connected(ref x))) => {
+			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::http::HttpMethod::GET);
@@ -922,7 +922,15 @@ mod test {
 				assert_eq!(x.headers, expected_headers);
 				x.connection_handle
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
+		};
+
+		let msg = test_rx.recv();
+		match msg {
+			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
+				assert_eq!(x.handle, 5);
+			}
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Send the headers ********************
@@ -954,7 +962,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		let msg = test_rx.recv();
@@ -964,7 +972,7 @@ mod test {
 				assert_eq!(x.context, 1234);
 				assert!(x.result.is_ok());
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Send the body ********************
@@ -990,7 +998,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		let msg = test_rx.recv();
@@ -1000,7 +1008,7 @@ mod test {
 				assert_eq!(x.context, 5678);
 				assert!(x.result.is_ok());
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Send an empty body ********************
@@ -1024,7 +1032,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		let msg = test_rx.recv();
@@ -1034,7 +1042,7 @@ mod test {
 				assert_eq!(x.context, 5678);
 				assert!(x.result.is_ok());
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Get a close indication ********************
@@ -1044,7 +1052,7 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** All done ********************
@@ -1077,7 +1085,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::Indication::Http(Indication::Connected(ref x))) => {
+			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::http::HttpMethod::GET);
@@ -1086,7 +1094,15 @@ mod test {
 				assert_eq!(x.headers, expected_headers);
 				x.connection_handle
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
+		};
+
+		let msg = test_rx.recv();
+		match msg {
+			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
+				assert_eq!(x.handle, 5);
+			}
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Send the headers ********************
@@ -1119,7 +1135,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		let msg = test_rx.recv();
@@ -1129,7 +1145,7 @@ mod test {
 				assert_eq!(x.context, 1234);
 				assert!(x.result.is_ok());
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Send the body ********************
@@ -1155,7 +1171,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		let msg = test_rx.recv();
@@ -1165,7 +1181,7 @@ mod test {
 				assert_eq!(x.context, 5678);
 				assert!(x.result.is_ok());
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Auto close ********************
@@ -1182,7 +1198,7 @@ mod test {
 				};
 				msg_reply_to.send_nonrequest(send_cfm);
 			}
-			_ => panic!("Bad match"),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** Get a close indication ********************
@@ -1192,7 +1208,7 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
-			_ => panic!("Bad match {:?}", msg),
+			_ => panic!("Bad match: {:?}", msg),
 		};
 
 		// ******************** All done ********************

@@ -357,19 +357,6 @@ pub fn make_channel() -> (MessageSender, MessageReceiver) {
 	return (MessageSender(tx), MessageReceiver(rx));
 }
 
-
-/// This dumps messages to the logger when they are dropped (i.e. once they have
-/// been handled). This means the log should be entirely sufficient to determine
-/// what the system has done, which is invaluable for debugging purposes.
-///
-/// In a future version, this logging might be in binary format over some sort
-/// of socket.
-impl Drop for Message {
-	fn drop(&mut self) {
-		// debug!("** {:?}", self);
-	}
-}
-
 /// This is the 'receive' end of our message pipe. It wraps up an
 /// `mpsc::Sender`, performing a bit of repetitive code required to Box up
 /// `RequestSendable` and `NonRequestSendable` messages and wrap them in a
