@@ -84,7 +84,7 @@ pub struct ReqBind {
 	/// Reflected in the cfm
 	pub context: ::Context,
 	/// Type of connection to bind
-	pub conn_type: ConnectionType
+	pub conn_type: ConnectionType,
 }
 
 make_request!(ReqBind, ::Request::Socket, Request::Bind);
@@ -522,7 +522,11 @@ impl TaskContext {
 				match cs.connection.write(&pw.data[pw.sent..]) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {} pending, leaving {} on handle: {}", len, to_send, left, cs.handle);
+						debug!("Sent {} of {} pending, leaving {} on handle: {}",
+						       len,
+						       to_send,
+						       left,
+						       cs.handle);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
 						// No cfm here - we wait some more
@@ -539,7 +543,9 @@ impl TaskContext {
 						pw.reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error on handle: {} (pending), err: {}", cs.handle, err);
+						warn!("Send error on handle: {} (pending), err: {}",
+						      cs.handle,
+						      err);
 						let cfm = CfmSend {
 							handle: cs.handle,
 							context: pw.context,
@@ -693,7 +699,9 @@ impl TaskContext {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
 			if cs.pending_writes.len() > 0 {
-				debug!("Storing write len {} on handle: {}", to_send, req_send.handle);
+				debug!("Storing write len {} on handle: {}",
+				       to_send,
+				       req_send.handle);
 				let pw = PendingWrite {
 					sent: 0,
 					context: req_send.context,
@@ -706,7 +714,11 @@ impl TaskContext {
 				match cs.connection.write(&req_send.data) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {}, leaving {} on handle: {}", len, to_send, left, cs.handle);
+						debug!("Sent {} of {}, leaving {} on handle: {}",
+						       len,
+						       to_send,
+						       left,
+						       cs.handle);
 						let pw = PendingWrite {
 							sent: len,
 							context: req_send.context,

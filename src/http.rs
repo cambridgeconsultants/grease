@@ -49,7 +49,7 @@ use ::socket;
 use ::socket::User as SocketUser;
 use ::prelude::*;
 
-pub use rushttp::http_response::HttpResponseStatus;
+pub use rushttp::response::HttpResponseStatus;
 
 // ****************************************************************************
 //
@@ -157,7 +157,9 @@ pub struct CfmResponseStart {
 	pub result: Result<(), Error>,
 }
 
-make_confirmation!(CfmResponseStart, ::Confirmation::Http, Confirmation::ResponseStart);
+make_confirmation!(CfmResponseStart,
+                   ::Confirmation::Http,
+                   Confirmation::ResponseStart);
 
 /// Confirms a ReqResponseBody has been sent
 #[derive(Debug)]
@@ -167,7 +169,9 @@ pub struct CfmResponseBody {
 	pub result: Result<(), Error>,
 }
 
-make_confirmation!(CfmResponseBody, ::Confirmation::Http, Confirmation::ResponseBody);
+make_confirmation!(CfmResponseBody,
+                   ::Confirmation::Http,
+                   Confirmation::ResponseBody);
 
 /// A new HTTP request has been received
 #[derive(Debug)]
@@ -175,7 +179,7 @@ pub struct IndRxRequest {
 	pub server_handle: ServerHandle,
 	pub connection_handle: ConnHandle,
 	pub url: String,
-	pub method: rushttp::http::HttpMethod,
+	pub method: rushttp::Method,
 	pub headers: HashMap<String, String>,
 }
 
@@ -305,7 +309,7 @@ struct Connection {
 	/// The socket handle for this specific connection
 	socket_handle: socket::ConnHandle,
 	/// The parser object we feed data through
-	parser: rushttp::http_request::HttpRequestParser,
+	parser: rushttp::request::Parser,
 	/// The length of the response body we're sending
 	/// When enough has been sent, we close the connection automatically.
 	/// If the length is None, close when an empty body request is sent
@@ -620,10 +624,10 @@ impl TaskContext {
 
 	fn send_response(&self,
 	                 handle: &socket::ConnHandle,
-	                 code: rushttp::http_response::HttpResponseStatus,
+	                 code: rushttp::response::HttpResponseStatus,
 	                 message: &str) {
 		// An error occured which we must tell them about
-		let mut r = rushttp::http_response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
+		let mut r = rushttp::response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
 		r.add_header("Content-Type", "text/plain");
 		let mut output = Vec::new();
 		if let Ok(_) = r.write(&mut output) {
@@ -770,12 +774,12 @@ impl SocketUser for TaskContext {
 				our_handle: self.get_ctx(),
 				server_handle: server_handle,
 				socket_handle: ind.conn_handle,
-				parser: rushttp::http_request::HttpRequestParser::new(),
+				parser: rushttp::request::Parser::new(),
 				body_length: None,
 			};
 			debug!("New connection {:?}, socket={:?}",
-				   conn.our_handle,
-				   conn.socket_handle);
+			       conn.our_handle,
+			       conn.socket_handle);
 			self.connections.insert(conn.our_handle, conn.socket_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");
@@ -801,7 +805,7 @@ impl SocketUser for TaskContext {
 		};
 
 		match r {
-			Some((rushttp::http_request::ParseResult::Complete(req, _), ch, sh, ind_to)) => {
+			Some((rushttp::request::ParseResult::Complete(req, _), ch, sh, ind_to)) => {
 				// All done!
 				let conn_ind = IndRxRequest {
 					server_handle: sh,
@@ -812,13 +816,13 @@ impl SocketUser for TaskContext {
 				};
 				ind_to.send_nonrequest(conn_ind);
 			}
-			Some((rushttp::http_request::ParseResult::InProgress, _, _, _)) => {
+			Some((rushttp::request::ParseResult::InProgress, _, _, _)) => {
 				// Need more data
 			}
 			Some(_) => {
 				self.delete_connection_by_socket_handle(&ind.handle);
 				self.send_response(&ind.handle,
-				                   rushttp::http_response::HttpResponseStatus::BadRequest,
+				                   rushttp::response::HttpResponseStatus::BadRequest,
 				                   "Bad Request");
 			}
 			None => {
@@ -913,7 +917,7 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
-				assert_eq!(x.method, rushttp::http::HttpMethod::GET);
+				assert_eq!(x.method, rushttp::Method::Get);
 				let mut expected_headers = HashMap::new();
 				expected_headers.insert(String::from("Host"), String::from("localhost"));
 				assert_eq!(x.headers, expected_headers);
@@ -1085,7 +1089,7 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
-				assert_eq!(x.method, rushttp::http::HttpMethod::GET);
+				assert_eq!(x.method, rushttp::Method::Get);
 				let mut expected_headers = HashMap::new();
 				expected_headers.insert(String::from("Host"), String::from("localhost"));
 				assert_eq!(x.headers, expected_headers);
