@@ -56,7 +56,9 @@ pub enum Confirmation {
 	Send(Box<CfmSend>),
 }
 
-/// Asynchronous indications sent by the Socket task
+/// Asynchronous indications sent by the Socket task.
+/// TODO: Perhaps indicate EOF/HUP ind here? As distinct from dropping the
+/// connection handle (which would mean you couldn't write either).
 #[derive(Debug)]
 pub enum Indication {
 	/// A Connected Indication - Indicates that a listening socket has been
@@ -67,8 +69,6 @@ pub enum Indication {
 	/// A Received Indication - Indicates that data has arrived on an open
 	/// socket
 	Received(Box<IndReceived>),
-	// Perhaps indicate EOF/HUP here? As distinct from dropping the
-	// connection handle (which would mean you couldn't write either).
 }
 
 /// Responses to Indications required
@@ -583,7 +583,12 @@ impl TaskContext {
 						cs.ind_to.send_nonrequest(ind);
 					}
 					Err(e) => {
-						debug!("Got \"{}\" reading on handle: {} {}", e, cs_handle, was_ready);
+						debug!(
+							"Got \"{}\" reading on handle: {} {}",
+							e,
+							cs_handle,
+							was_ready
+						);
 						// Don't close if this is speculative
 						need_close = was_ready;
 					}
