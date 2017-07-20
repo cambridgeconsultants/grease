@@ -176,6 +176,9 @@ extern crate multi_map;
 extern crate rushttp;
 #[cfg(test)]
 extern crate rand;
+#[cfg(test)]
+extern crate env_logger;
+
 
 // ****************************************************************************
 //

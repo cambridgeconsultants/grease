@@ -67,6 +67,8 @@ pub enum Indication {
 	/// A Received Indication - Indicates that data has arrived on an open
 	/// socket
 	Received(Box<IndReceived>),
+	// Perhaps indicate EOF/HUP here? As distinct from dropping the
+	// connection handle (which would mean you couldn't write either).
 }
 
 /// Responses to Indications required
@@ -564,7 +566,7 @@ impl TaskContext {
 				let mut buffer = vec![0u8; MAX_READ_LEN];
 				match cs.connection.read(buffer.as_mut_slice()) {
 					Ok(0) => {
-						debug!("Read nothing on handle: {}", cs_handle);
+						debug!("Read nothing on handle: {} {}", cs_handle, was_ready);
 						// Reading zero bytes after a POLLIN means connection is closed
 						// See http://www.greenend.org.uk/rjk/tech/poll.html
 						// But don't close if this is speculative
@@ -581,7 +583,7 @@ impl TaskContext {
 						cs.ind_to.send_nonrequest(ind);
 					}
 					Err(e) => {
-						debug!("Got \"{}\" reading on handle: {}", e, cs_handle);
+						debug!("Got \"{}\" reading on handle: {} {}", e, cs_handle, was_ready);
 						// Don't close if this is speculative
 						need_close = was_ready;
 					}
@@ -799,6 +801,7 @@ mod test {
 	use std::net;
 	use rand;
 	use rand::Rng;
+	use env_logger;
 	use super::*;
 
 	#[test]
@@ -991,7 +994,15 @@ mod test {
 
 	#[test]
 	/// Uses 127.0.1.1:8004 to send random data
+	/// With the changes to remove hup and error, this test no longer passes
+	/// 100%. I think that's because there's a race between closing the socket
+	/// and sending the read response. We do a read, and get data. That was
+	/// actually the end of the data, but we didn't know it. When we do
+	/// a read after the response has arrived, we consider it speculative
+	/// and so don't declare the lack of data as an EOF marker.
 	fn send_data() {
+		let _ = env_logger::init();
+
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 
@@ -1046,6 +1057,8 @@ mod test {
 
 		stream.shutdown(net::Shutdown::Both).unwrap();
 
+		drop(stream);
+
 		// Check we get an IndDropped
 		match test_rx.recv() {
 			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
@@ -1053,6 +1066,7 @@ mod test {
 			}
 			_ => panic!("Bad match"),
 		};
+
 	}
 
 	#[test]
