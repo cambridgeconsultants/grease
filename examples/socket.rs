@@ -17,7 +17,7 @@ use std::thread;
 use std::net;
 
 use env_logger::LogBuilder;
-use grease::socket::*;
+use grease::socket;
 
 use log::{LogRecord, LogLevelFilter};
 
@@ -67,13 +67,13 @@ fn main() {
 	info!("Hello, this is the grease socket example.");
 	info!("Running echo server on {}", bind_addr);
 
-	let socket_thread = make_task();
+	let socket_thread = socket::make_task();
 	let (tx, rx) = grease::make_channel();
 	{
-		let bind_req = ReqBind {
+		let bind_req = socket::ReqBind {
 			context: 2,
 			addr: bind_addr,
-			conn_type: ConnectionType::Stream,
+			conn_type: socket::ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &tx);
 	}
@@ -83,11 +83,11 @@ fn main() {
 	for msg in rx.iter() {
 		grease::MessageReceiver::render(&msg);
 		match msg {
-			grease::Message::Indication(grease::Indication::Socket(Indication::Received(ind))) => {
+			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Received(ind))) => {
 				info!("Echoing {} bytes of input", ind.data.len());
-				let recv_rsp = RspReceived { handle: ind.handle };
+				let recv_rsp = socket::RspReceived { handle: ind.handle };
 				socket_thread.send_nonrequest(recv_rsp);
-				let send_req = ReqSend {
+				let send_req = socket::ReqSend {
 					handle: ind.handle,
 					data: ind.data,
 					context: n,
@@ -95,14 +95,14 @@ fn main() {
 				socket_thread.send_request(send_req, &tx);
 				n = n + 1;
 			}
-			grease::Message::Indication(grease::Indication::Socket(Indication::Connected(ind))) => {
+			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Connected(ind))) => {
 				info!(
 					"Got connection from {}, handle = {}",
 					ind.peer,
 					ind.conn_handle
 				);
 			}
-			grease::Message::Indication(grease::Indication::Socket(Indication::Dropped(ind))) => {
+			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Dropped(ind))) => {
 				info!("Connection dropped, handle = {}", ind.handle);
 			}
 			_ => {}
