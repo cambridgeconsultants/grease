@@ -14,3 +14,4 @@ log = "0.3"
 mio = "0.6"
 rushttp = { git = "https://github.com/thejpster/rushttp.git" }
 multi-map = "^1.0"
+mio-more = { git = "https://github.com/carllerche/mio-more.git" }

@@ -22,8 +22,9 @@ use std::net;
 use std::thread;
 
 use mio;
+use mio_more;
 
-use ::prelude::*;
+use prelude::*;
 
 // ****************************************************************************
 //
@@ -317,7 +318,7 @@ struct TaskContext {
 	/// The next handle we'll use for a bound/open socket
 	next_handle: ::Context,
 	/// The special channel our messages arrive on
-	mio_rx: mio::channel::Receiver<::Message>,
+	mio_rx: mio_more::channel::Receiver<::Message>,
 	/// The object we poll on
 	poll: mio::Poll,
 }
@@ -363,11 +364,9 @@ pub fn make_task() -> ::MessageSender {
 /// channel to the other. We don't need our own
 /// MessageSender as we don't send Requests that need replying to.
 fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
-	let (mio_tx, mio_rx) = mio::channel::channel();
-	let _ = thread::spawn(move || {
-		for msg in grease_rx.iter() {
-			let _ = mio_tx.send(msg);
-		}
+	let (mio_tx, mio_rx) = mio_more::channel::channel();
+	let _ = thread::spawn(move || for msg in grease_rx.iter() {
+		let _ = mio_tx.send(msg);
 	});
 	let mut task_context = TaskContext::new(mio_rx);
 	loop {
@@ -381,14 +380,16 @@ impl TaskContext {
 		let num_events = self.poll.poll(&mut events, None).unwrap();
 		trace!("Woke up! Handling num_events={}", num_events);
 		for event in events.iter() {
-			self.ready(event.token(), event.kind())
+			self.ready(event)
 		}
 	}
 
 	/// Called when mio has an update on a registered listener or connection
 	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
-	fn ready(&mut self, token: mio::Token, ready: mio::Ready) {
+	fn ready(&mut self, event: mio::Event) {
+		let ready = event.readiness();
+		let token = event.token();
 		debug!("ready: {:?}, token: {:?}", ready, token);
 		let handle = token.0;
 		if ready.is_readable() {
@@ -423,27 +424,9 @@ impl TaskContext {
 				debug!("Writable on unknown token {}", handle);
 			}
 		}
-		if ready.is_error() {
-			if self.listeners.contains_key(&handle) {
-				debug!("Error listen socket {}", handle);
-			} else if self.connections.contains_key(&handle) {
-				debug!("Error connected socket {}", handle);
-				self.dropped(handle);
-			} else {
-				// Probably just closed
-				debug!("Error on unknown token {}", handle);
-			}
-		}
-		if ready.is_hup() {
-			if self.listeners.contains_key(&handle) {
-				warn!("HUP listen socket {} is not handled.", handle);
-			} else if self.connections.contains_key(&handle) {
-				debug!("HUP connected socket {}", handle);
-			} else {
-				// Probably just closed
-				debug!("HUP on unknown token {}", handle);
-			}
-		}
+		// We used to check .is_error() and .is_hup() here, but they are now
+		// considered UNIX only. We could put them back in, but would need to
+		// handle Windows differently.
 	}
 
 	/// Called when our task has received a Message
@@ -461,7 +444,7 @@ impl TaskContext {
 	}
 
 	/// Init the context
-	pub fn new(mio_rx: mio::channel::Receiver<::Message>) -> TaskContext {
+	pub fn new(mio_rx: mio_more::channel::Receiver<::Message>) -> TaskContext {
 		let t = TaskContext {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
@@ -470,10 +453,12 @@ impl TaskContext {
 			poll: mio::Poll::new().unwrap(),
 		};
 		t.poll
-			.register(&t.mio_rx,
-			          MESSAGE_TOKEN,
-			          mio::Ready::readable(),
-			          mio::PollOpt::level())
+			.register(
+				&t.mio_rx,
+				MESSAGE_TOKEN,
+				mio::Ready::readable(),
+				mio::PollOpt::level(),
+			)
 			.unwrap();
 		t
 	}
@@ -494,11 +479,12 @@ impl TaskContext {
 			};
 			self.next_handle += 1;
 			self.poll
-				.register(&cs.connection,
-				          mio::Token(cs.handle),
-				          mio::Ready::readable() | mio::Ready::writable() | mio::Ready::hup() |
-				          mio::Ready::error(),
-				          mio::PollOpt::edge())
+				.register(
+					&cs.connection,
+					mio::Token(cs.handle),
+					mio::Ready::readable() | mio::Ready::writable(),
+					mio::PollOpt::edge(),
+				)
 				.unwrap();
 			let ind = IndConnected {
 				listen_handle: ls.handle,
@@ -522,11 +508,13 @@ impl TaskContext {
 				match cs.connection.write(&pw.data[pw.sent..]) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {} pending, leaving {} on handle: {}",
-						       len,
-						       to_send,
-						       left,
-						       cs.handle);
+						debug!(
+							"Sent {} of {} pending, leaving {} on handle: {}",
+							len,
+							to_send,
+							left,
+							cs.handle
+						);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
 						// No cfm here - we wait some more
@@ -543,9 +531,11 @@ impl TaskContext {
 						pw.reply_to.send_nonrequest(cfm);
 					}
 					Err(err) => {
-						warn!("Send error on handle: {} (pending), err: {}",
-						      cs.handle,
-						      err);
+						warn!(
+							"Send error on handle: {} (pending), err: {}",
+							cs.handle,
+							err
+						);
 						let cfm = CfmSend {
 							handle: cs.handle,
 							context: pw.context,
@@ -645,10 +635,12 @@ impl TaskContext {
 					ind_to: reply_to.clone(),
 					listener: server,
 				};
-				match self.poll.register(&l.listener,
-				                         mio::Token(h),
-				                         mio::Ready::readable(),
-				                         mio::PollOpt::level()) {
+				match self.poll.register(
+					&l.listener,
+					mio::Token(h),
+					mio::Ready::readable(),
+					mio::PollOpt::level(),
+				) {
 					Ok(_) => {
 						self.listeners.insert(h, l);
 						CfmBind {
@@ -699,9 +691,11 @@ impl TaskContext {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
 			if cs.pending_writes.len() > 0 {
-				debug!("Storing write len {} on handle: {}",
-				       to_send,
-				       req_send.handle);
+				debug!(
+					"Storing write len {} on handle: {}",
+					to_send,
+					req_send.handle
+				);
 				let pw = PendingWrite {
 					sent: 0,
 					context: req_send.context,
@@ -709,16 +703,18 @@ impl TaskContext {
 					reply_to: reply_to.clone(),
 				};
 				cs.pending_writes.push_back(pw);
-				// No cfm here - we wait
+			// No cfm here - we wait
 			} else {
 				match cs.connection.write(&req_send.data) {
 					Ok(len) if len < to_send => {
 						let left = to_send - len;
-						debug!("Sent {} of {}, leaving {} on handle: {}",
-						       len,
-						       to_send,
-						       left,
-						       cs.handle);
+						debug!(
+							"Sent {} of {}, leaving {} on handle: {}",
+							len,
+							to_send,
+							left,
+							cs.handle
+						);
 						let pw = PendingWrite {
 							sent: len,
 							context: req_send.context,
@@ -1027,7 +1023,10 @@ mod test {
 		};
 
 		// Send some data
-		let data = rand::thread_rng().gen_iter().take(1024).collect::<Vec<u8>>();
+		let data = rand::thread_rng()
+			.gen_iter()
+			.take(1024)
+			.collect::<Vec<u8>>();
 		let mut rx_data = Vec::new();
 		stream.write(&data).unwrap();
 
@@ -1092,13 +1091,18 @@ mod test {
 		test_rx.check_empty();
 
 		// Send some data using the socket thread
-		let data = rand::thread_rng().gen_iter().take(1024).collect::<Vec<u8>>();
-		socket_thread.send_request(ReqSend {
-			                           handle: conn_handle,
-			                           context: 1234,
-			                           data: data.clone(),
-		                           },
-		                           &reply_to);
+		let data = rand::thread_rng()
+			.gen_iter()
+			.take(1024)
+			.collect::<Vec<u8>>();
+		socket_thread.send_request(
+			ReqSend {
+				handle: conn_handle,
+				context: 1234,
+				data: data.clone(),
+			},
+			&reply_to,
+		);
 
 		test_rx.check_empty();
 
@@ -1148,20 +1152,24 @@ mod test {
 /// Don't log the contents of the vector
 impl fmt::Debug for IndReceived {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f,
-		       "IndReceived {{ handle: {}, data.len: {} }}",
-		       self.handle,
-		       self.data.len())
+		write!(
+			f,
+			"IndReceived {{ handle: {}, data.len: {} }}",
+			self.handle,
+			self.data.len()
+		)
 	}
 }
 
 /// Don't log the contents of the vector
 impl fmt::Debug for ReqSend {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f,
-		       "ReqSend {{ handle: {}, data.len: {} }}",
-		       self.handle,
-		       self.data.len())
+		write!(
+			f,
+			"ReqSend {{ handle: {}, data.len: {} }}",
+			self.handle,
+			self.data.len()
+		)
 	}
 }
 

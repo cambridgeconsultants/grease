@@ -171,6 +171,7 @@ macro_rules! make_response(
 #[macro_use]
 extern crate log;
 extern crate mio;
+extern crate mio_more;
 extern crate multi_map;
 extern crate rushttp;
 #[cfg(test)]
@@ -335,8 +336,9 @@ pub trait RequestSendable {
 /// # }
 /// ```
 pub fn make_task<F>(name: &str, main_loop: F) -> MessageSender
-	where F: FnOnce(MessageReceiver, MessageSender),
-	      F: Send + 'static
+where
+	F: FnOnce(MessageReceiver, MessageSender),
+	F: Send + 'static,
 {
 	let (sender, receiver) = make_channel();
 	let angle_name = format!("<{}>", name);
