@@ -127,8 +127,10 @@ struct TaskContext {
 /// to send this task messages.
 pub fn make_task(http: &::MessageSender) -> ::MessageSender {
 	let local_http = http.clone();
-	::make_task("webserv",
-	            move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_http))
+	::make_task("webserv", move |rx: ::MessageReceiver,
+	      tx: ::MessageSender| {
+		main_loop(rx, tx, local_http)
+	})
 }
 
 // ****************************************************************************
@@ -192,9 +194,11 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_webserv_sendstatusgetresult_req(&mut self,
-	                                          _msg: &ReqSendStatusGetResult,
-	                                          _reply_to: &::MessageSender) {
+	fn handle_webserv_sendstatusgetresult_req(
+		&mut self,
+		_msg: &ReqSendStatusGetResult,
+		_reply_to: &::MessageSender,
+	) {
 
 	}
 }
