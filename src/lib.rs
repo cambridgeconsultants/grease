@@ -326,6 +326,11 @@ pub trait RequestSendable {
 /// `MessageSender` should be passed to any other tasks that need to message
 /// this one.
 ///
+/// TODO:
+/// Create a `MessageHandler` trait and change this to
+/// rx.loop(&mut t);
+/// Where loop(self, &mut MessageHandler) -> !
+///
 /// ```
 /// fn main_loop(rx: grease::MessageReceiver, _reply_to: grease::MessageSender) {
 ///     for msg in rx.iter() {
@@ -406,9 +411,10 @@ impl MessageReceiver {
 	/// stabilises, to the avoid the possibility of your test hanging
 	/// indefinitely.
 	pub fn recv(&self) -> Message {
-		match self.0.recv() {
+		match self.0.recv_timeout(std::time::Duration::from_millis(1000)) {
 			Ok(msg) => msg,
-			Err(_) => panic!("Channel disconnected"),
+			Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("Channel disconnected!"),
+			Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("Channel timeout..."),
 		}
 	}
 
