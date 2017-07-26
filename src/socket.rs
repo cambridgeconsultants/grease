@@ -339,7 +339,7 @@ struct TaskContext {
 //
 // ****************************************************************************
 
-const MAX_READ_LEN: usize = 128;
+const MAX_READ_LEN: usize = 2048;
 const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 // ****************************************************************************
@@ -382,14 +382,14 @@ impl TaskContext {
 		let num_events = self.poll.poll(&mut events, None).unwrap();
 		trace!("Woke up! Handling num_events={}", num_events);
 		for event in events.iter() {
-			self.ready(event)
+			self.process_event(event)
 		}
 	}
 
 	/// Called when mio has an update on a registered listener or connection
 	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
-	fn ready(&mut self, event: mio::Event) {
+	fn process_event(&mut self, event: mio::Event) {
 		let ready = event.readiness();
 		let token = event.token();
 		debug!("ready: {:?}, token: {:?}", ready, token);
@@ -407,10 +407,10 @@ impl TaskContext {
 				}
 			} else if self.listeners.contains_key(&handle) {
 				debug!("Readable listen socket {}?", handle);
-				self.accept(handle)
+				self.accept_new_connection(handle)
 			} else if self.connections.contains_key(&handle) {
 				debug!("Readable connected socket {}", handle);
-				self.read(handle, true)
+				self.read_from_socket(handle)
 			} else {
 				warn!("Readable on unknown token {}", handle);
 			}
@@ -467,7 +467,7 @@ impl TaskContext {
 
 	/// Accept a new incoming connection and let the user know
 	/// with a IndConnected
-	fn accept(&mut self, ls_handle: ListenHandle) {
+	fn accept_new_connection(&mut self, ls_handle: ListenHandle) {
 		// We know this exists because we checked it before we got here
 		let ls = self.listeners.get(&ls_handle).unwrap();
 		if let Ok((stream, conn_addr)) = ls.listener.accept() {
@@ -554,7 +554,7 @@ impl TaskContext {
 	}
 
 	/// Data is available on a connected socket. Pass it up
-	fn read(&mut self, cs_handle: ConnHandle, was_ready: bool) {
+	fn read_from_socket(&mut self, cs_handle: ConnHandle) {
 		debug!("Reading connection {}", cs_handle);
 		let mut need_close = false;
 		{
@@ -566,11 +566,10 @@ impl TaskContext {
 				let mut buffer = vec![0u8; MAX_READ_LEN];
 				match cs.connection.read(buffer.as_mut_slice()) {
 					Ok(0) => {
-						debug!("Read nothing on handle: {} {}", cs_handle, was_ready);
+						debug!("Read nothing on handle: {}", cs_handle);
 						// Reading zero bytes after a POLLIN means connection is closed
 						// See http://www.greenend.org.uk/rjk/tech/poll.html
-						// But don't close if this is speculative
-						need_close = was_ready;
+						need_close = true;
 					}
 					Ok(len) => {
 						debug!("Read {} octets on handle: {}", len, cs_handle);
@@ -582,15 +581,10 @@ impl TaskContext {
 						cs.outstanding = true;
 						cs.ind_to.send_nonrequest(ind);
 					}
-					Err(e) => {
-						debug!(
-							"Got \"{}\" reading on handle: {} {}",
-							e,
-							cs_handle,
-							was_ready
-						);
-						// Don't close if this is speculative
-						need_close = was_ready;
+					Err(ref err) if err.kind() == ::std::io::ErrorKind::WouldBlock => {}
+					Err(err) => {
+						warn!("Read error on handle: {}, err: {}", cs.handle, err);
+						need_close = true;
 					}
 				}
 			} else {
@@ -775,14 +769,14 @@ impl TaskContext {
 		// have crossed over with a disconnect.
 		if let Some(cs) = self.connections.get_mut(&rsp_received.handle) {
 			cs.outstanding = false;
-			// Let's try and send them some - if if exhausts the
-			// buffer on the socket, the event loop will automatically
-			// set itself to interrupt when more data arrives
+			// Let's try and send them some more data - if it exhausts the
+			// buffer on the socket, the event loop will automatically set
+			// itself to interrupt when more data arrives
 			need_read = true;
 		}
 		if need_read {
 			// Try and read it - won't hurt if we can't.
-			self.read(rsp_received.handle, false)
+			self.read_from_socket(rsp_received.handle)
 		}
 	}
 }
