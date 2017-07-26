@@ -84,9 +84,10 @@ fn main() {
 		grease::MessageReceiver::render(&msg);
 		match msg {
 			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Received(ind))) => {
-				info!("Echoing {} bytes of input", ind.data.len());
+				std::thread::sleep(std::time::Duration::from_millis(500));
 				let recv_rsp = socket::RspReceived { handle: ind.handle };
 				socket_thread.send_nonrequest(recv_rsp);
+				info!("Echoing {} bytes of input", ind.data.len());
 				let send_req = socket::ReqSend {
 					handle: ind.handle,
 					data: ind.data,
