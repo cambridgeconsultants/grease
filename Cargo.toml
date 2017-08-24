@@ -1,6 +1,6 @@
 [package]
 name = "grease"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
 readme = "README.md"
 
@@ -12,6 +12,6 @@ rand = "0.3"
 [dependencies]
 log = "0.3"
 mio = "0.6"
-rushttp = { git = "https://github.com/thejpster/rushttp.git" }
+rushttp = { git = "https://github.com/thejpster/rushttp.git", rev="9317c745f85238cba2e2b0be8a0e07ed39eb5e53"}
 multi-map = "^1.0"
-mio-more = { git = "https://github.com/carllerche/mio-more.git" }
+mio-more = "0.1.0"

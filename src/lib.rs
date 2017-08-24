@@ -218,7 +218,32 @@ pub struct MessageReceiver(mpsc::Receiver<Message>);
 /// A type used to passing context between layers. If each layer maintains
 /// a HashMap<Context, T>, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.
-pub type Context = usize;
+/// TODO: Replace this with a trait and a macro that generates a newtype
+/// which implements the trait.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Context(usize);
+
+impl Default for Context {
+    fn default() -> Context {
+        Context(0)
+    }
+}
+
+impl std::fmt::Display for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Context({})", self.0)
+	}
+}
+
+impl Context {
+	/// You can use take to grab a copy of the current value,
+	/// while incrementing it ready for the next use.
+	pub fn take(&mut self) -> Context {
+		let result = Context(self.0);
+		self.0 = self.0.wrapping_add(1);
+		result
+	}
+}
 
 /// When handling a request, the process may take some time. As the request
 /// must be destroyed as soon as it arrives (for logging purposes), the

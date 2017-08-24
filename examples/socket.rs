@@ -71,14 +71,14 @@ fn main() {
 	let (tx, rx) = grease::make_channel();
 	{
 		let bind_req = socket::ReqBind {
-			context: 2,
+			context: grease::Context::default(),
 			addr: bind_addr,
 			conn_type: socket::ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &tx);
 	}
 
-	let mut n: grease::Context = 0;
+	let mut n: grease::Context = grease::Context::default();
 
 	for msg in rx.iter() {
 		grease::MessageReceiver::render(&msg);
@@ -91,10 +91,9 @@ fn main() {
 				let send_req = socket::ReqSend {
 					handle: ind.handle,
 					data: ind.data,
-					context: n,
+					context: n.take(),
 				};
 				socket_thread.send_request(send_req, &tx);
-				n = n + 1;
 			}
 			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Connected(ind))) => {
 				info!(

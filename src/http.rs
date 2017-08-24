@@ -378,18 +378,9 @@ impl TaskContext {
 			connections: MultiMap::new(),
 			reply_to: us,
 			// This number is arbitrary
-			next_ctx: 2_000,
+			next_ctx: ::Context(2_000),
 			pending: HashMap::new(),
 		}
-	}
-
-	/// Get a new context number, which doesn't match any of the previous
-	/// context numbers (unless we've been running for a really really long
-	/// time).
-	fn get_ctx(&mut self) -> ::Context {
-		let result = self.next_ctx;
-		self.next_ctx = self.next_ctx + 1;
-		result
 	}
 
 	/// Handle an incoming message. It might a `Request` for us,
@@ -424,7 +415,7 @@ impl TaskContext {
 		let server = Server {
 			listen_handle: None,
 			reply_ctx: Some(reply_ctx),
-			our_handle: self.get_ctx(),
+			our_handle: self.next_ctx.take(),
 			ind_to: reply_to.clone(),
 		};
 		let req = socket::ReqBind {
@@ -529,7 +520,7 @@ impl TaskContext {
 			);
 			let req = socket::ReqSend {
 				handle: skt,
-				context: self.get_ctx(),
+				context: self.next_ctx.take(),
 				data: s.into_bytes(),
 			};
 			let pend = PendingCfm {
@@ -596,7 +587,7 @@ impl TaskContext {
 				// Send the cfm when the socket server has sent this data
 				let req = socket::ReqSend {
 					handle: skt,
-					context: self.get_ctx(),
+					context: self.next_ctx.take(),
 					data: req_body.data.clone(),
 				};
 				let pend = PendingCfm {
@@ -612,7 +603,7 @@ impl TaskContext {
 				// Close connection now!
 				let req = socket::ReqClose {
 					handle: skt,
-					context: self.get_ctx(),
+					context: self.next_ctx.take(),
 				};
 				let pend = PendingCfm {
 					handle: req_body.handle,
@@ -648,7 +639,7 @@ impl TaskContext {
 		if let Ok(_) = r.write(&mut output) {
 			let req = socket::ReqSend {
 				handle: *handle,
-				context: 0,
+				context: ::Context::default(),
 				data: output,
 			};
 			self.socket.send_request(req, &self.reply_to);
@@ -658,7 +649,7 @@ impl TaskContext {
 
 		let close_req = socket::ReqClose {
 			handle: *handle,
-			context: 0,
+			context: ::Context::default(),
 		};
 		self.socket.send_request(close_req, &self.reply_to);
 	}
@@ -763,7 +754,7 @@ impl SocketUser for TaskContext {
 				// Close connection now!
 				let req = socket::ReqClose {
 					handle: cfm.handle,
-					context: self.get_ctx(),
+					context: self.next_ctx.take(),
 				};
 				let pend = PendingCfm {
 					handle: pend.handle,
@@ -786,7 +777,7 @@ impl SocketUser for TaskContext {
 		debug!("Got {:?}", ind);
 		if let Some(server_handle) = self.get_server_handle_by_socket_handle(&ind.listen_handle) {
 			let conn = Connection {
-				our_handle: self.get_ctx(),
+				our_handle: self.next_ctx.take(),
 				server_handle: server_handle,
 				socket_handle: ind.conn_handle,
 				parser: rushttp::request::Parser::new(),
@@ -913,7 +904,7 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let _ = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8000", 1, 2);
+		let _ = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8000", ::Context(1), ::Context(2));
 	}
 
 	#[test]
@@ -921,13 +912,13 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", 3, 4);
+		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", ::Context(3), ::Context(4));
 
 		// ******************** Connection opens ********************
 
 		let msg = socket::IndConnected {
-			listen_handle: 4,
-			conn_handle: 5,
+			listen_handle: ::Context(4),
+			conn_handle: ::Context(5),
 			peer: "127.0.0.1:56789".parse().unwrap(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -935,7 +926,7 @@ mod test {
 		// ******************** Request arrives ********************
 
 		let msg = socket::IndReceived {
-			handle: 5,
+			handle: ::Context(5),
 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -957,7 +948,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
 		};
@@ -966,7 +957,7 @@ mod test {
 
 		let mut msg = ReqResponseStart {
 			handle: ch,
-			context: 1234,
+			context: ::Context(1234),
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: None,
@@ -982,7 +973,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
 				               text/plain\r\nX-Magic: frobbins\r\n\r\n"
 					.as_bytes();
@@ -1001,7 +992,7 @@ mod test {
 		match msg {
 			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, 1234);
+				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1012,7 +1003,7 @@ mod test {
 		let test_body = Vec::from("One two, Rust on my shoe");
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: 5678,
+			context: ::Context(5678),
 			data: test_body.clone(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1021,7 +1012,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
 					handle: x.handle,
@@ -1037,7 +1028,7 @@ mod test {
 		match msg {
 			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1047,7 +1038,7 @@ mod test {
 
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: 5678,
+			context: ::Context(5678),
 			data: Vec::new(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1056,7 +1047,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Close(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
 					context: x.context,
@@ -1071,7 +1062,7 @@ mod test {
 		match msg {
 			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1096,13 +1087,13 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", 3, 4);
+		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", ::Context(3), ::Context(4));
 
 		// ******************** Connection opens ********************
 
 		let msg = socket::IndConnected {
-			listen_handle: 4,
-			conn_handle: 5,
+			listen_handle: ::Context(4),
+			conn_handle: ::Context(5),
 			peer: "127.0.0.1:56789".parse().unwrap(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -1110,7 +1101,7 @@ mod test {
 		// ******************** Request arrives ********************
 
 		let msg = socket::IndReceived {
-			handle: 5,
+			handle: ::Context(5),
 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -1132,7 +1123,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
 		};
@@ -1141,7 +1132,7 @@ mod test {
 
 		let mut msg = ReqResponseStart {
 			handle: ch,
-			context: 1234,
+			context: ::Context(1234),
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: Some(24),
@@ -1157,7 +1148,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
 				               24\r\nContent-Type: text/plain\r\nX-Magic: frobbins\r\n\r\n"
 					.as_bytes();
@@ -1177,7 +1168,7 @@ mod test {
 		match msg {
 			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, 1234);
+				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1188,7 +1179,7 @@ mod test {
 		let test_body = Vec::from("One two, Rust on my shoe");
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: 5678,
+			context: ::Context(5678),
 			data: test_body.clone(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1197,7 +1188,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
 					handle: x.handle,
@@ -1213,7 +1204,7 @@ mod test {
 		match msg {
 			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1225,7 +1216,7 @@ mod test {
 		match msg {
 			::Message::Request(ref msg_reply_to,
 			                   ::Request::Socket(socket::Request::Close(ref x))) => {
-				assert_eq!(x.handle, 5);
+				assert_eq!(x.handle, ::Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
 					context: x.context,

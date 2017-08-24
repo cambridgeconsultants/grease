@@ -164,7 +164,7 @@ impl TaskContext {
 	fn init(&mut self) {
 		let msg = http::ReqBind {
 			addr: "0.0.0.0:8000".parse().unwrap(),
-			context: 0,
+			context: ::Context::default(),
 		};
 		self.http.send_request(msg, &self.reply_to);
 	}

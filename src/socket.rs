@@ -393,7 +393,7 @@ impl TaskContext {
 		let ready = event.readiness();
 		let token = event.token();
 		debug!("ready: {:?}, token: {:?}", ready, token);
-		let handle = token.0;
+		let handle = ::Context(token.0);
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
 				loop {
@@ -450,7 +450,7 @@ impl TaskContext {
 		let t = TaskContext {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
-			next_handle: MESSAGE_TOKEN.0 + 1,
+			next_handle: ::Context(MESSAGE_TOKEN.0 + 1),
 			mio_rx: mio_rx,
 			poll: mio::Poll::new().unwrap(),
 		};
@@ -473,17 +473,16 @@ impl TaskContext {
 		if let Ok((stream, conn_addr)) = ls.listener.accept() {
 			let cs = ConnectedSocket {
 				// parent: ls.handle,
-				handle: self.next_handle,
+				handle: self.next_handle.take(),
 				ind_to: ls.ind_to.clone(),
 				connection: stream,
 				outstanding: false,
 				pending_writes: VecDeque::new(),
 			};
-			self.next_handle += 1;
 			self.poll
 				.register(
 					&cs.connection,
-					mio::Token(cs.handle),
+					mio::Token(cs.handle.0),
 					mio::Ready::readable() | mio::Ready::writable(),
 					mio::PollOpt::edge(),
 				)
@@ -626,8 +625,7 @@ impl TaskContext {
 	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
-				let h = self.next_handle;
-				self.next_handle += 1;
+				let h = self.next_handle.take();
 				debug!("Allocated listen handle: {}", h);
 				let l = ListenSocket {
 					handle: h,
@@ -638,7 +636,7 @@ impl TaskContext {
 				};
 				match self.poll.register(
 					&l.listener,
-					mio::Token(h),
+					mio::Token(h.0),
 					mio::Ready::readable(),
 					mio::PollOpt::level(),
 				) {
@@ -810,14 +808,14 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8000".parse().unwrap(),
-			context: 1234,
+			context: ::Context(1234),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 1234);
+				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match"),
@@ -832,14 +830,14 @@ mod test {
 		// Shouldn't be able to bind :22 as normal user
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:22".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_err());
 			}
 			_ => panic!("Bad match"),
@@ -854,14 +852,14 @@ mod test {
 		// Shouldn't be able to bind :22 as normal user
 		let bind_req = ReqBind {
 			addr: "8.8.8.8:8000".parse().unwrap(),
-			context: 6666,
+			context: ::Context(6666),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 6666);
+				assert_eq!(x.context, ::Context(6666));
 				assert!(x.result.is_err());
 			}
 			_ => panic!("Bad match"),
@@ -876,13 +874,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8001".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -920,13 +918,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8002".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8002 = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -934,13 +932,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8003".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8003 = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -1007,13 +1005,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8004".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -1076,13 +1074,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8005".parse().unwrap(),
-			context: 5678,
+			context: ::Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
 			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -1111,7 +1109,7 @@ mod test {
 		socket_thread.send_request(
 			ReqSend {
 				handle: conn_handle,
-				context: 1234,
+				context: ::Context(1234),
 				data: data.clone(),
 			},
 			&reply_to,
@@ -1142,7 +1140,7 @@ mod test {
 				} else {
 					panic!("Didn't get OK in CfmSend");
 				}
-				assert_eq!(x.context, 1234);
+				assert_eq!(x.context, ::Context(1234));
 			}
 			_ => panic!("Bad match"),
 		};

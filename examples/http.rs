@@ -76,12 +76,12 @@ fn main() {
 	{
 		let bind_req = http::ReqBind {
 			addr: bind_addr,
-			context: 2,
+			context: grease::Context::default(),
 		};
 		http_thread.send_request(bind_req, &tx);
 	}
 
-	let mut n: grease::Context = 0;
+	let mut n: grease::Context = grease::Context::default();
 
 
 	for msg in rx.iter() {
@@ -90,10 +90,11 @@ fn main() {
 			grease::Message::Indication(grease::Indication::Http(http::Indication::RxRequest(ref ind))) => {
                 let body_msg = format!("This is test {}\r\n", n);
                 info!("Got HTTP request {:?} {}", ind.method, ind.url);
+                let ctx = n.take();
                 let start = http::ReqResponseStart {
                     status: http::HttpResponseStatus::OK,
                     handle: ind.connection_handle,
-                    context: n,
+                    context: ctx,
                     content_type: String::from("text/plain"),
                     length: Some(body_msg.len()),
                     headers: HashMap::new()
@@ -101,11 +102,10 @@ fn main() {
                 http_thread.send_request(start, &tx);
                 let body = http::ReqResponseBody {
                     handle: ind.connection_handle,
-                    context: n,
+                    context: ctx,
                     data: body_msg.into_bytes()
                 };
                 http_thread.send_request(body, &tx);
-                n = n + 1;
             }
 			_ => {}
 		}
