@@ -90,7 +90,7 @@ pub struct ReqBind {
 	pub conn_type: ConnectionType,
 }
 
-make_request!(ReqBind, ::Request::Socket, Request::Bind);
+make_request!(ReqBind, ::RequestTask::Socket, Request::Bind);
 
 /// Close an open connection
 #[derive(Debug)]
@@ -101,7 +101,7 @@ pub struct ReqClose {
 	pub context: ::Context,
 }
 
-make_request!(ReqClose, ::Request::Socket, Request::Close);
+make_request!(ReqClose, ::RequestTask::Socket, Request::Close);
 
 /// Send something on a connection
 pub struct ReqSend {
@@ -113,7 +113,7 @@ pub struct ReqSend {
 	pub data: Vec<u8>,
 }
 
-make_request!(ReqSend, ::Request::Socket, Request::Send);
+make_request!(ReqSend, ::RequestTask::Socket, Request::Send);
 
 /// Reply to a ReqBind.
 #[derive(Debug)]
@@ -124,7 +124,7 @@ pub struct CfmBind {
 	pub context: ::Context,
 }
 
-make_confirmation!(CfmBind, ::Confirmation::Socket, Confirmation::Bind);
+make_confirmation!(CfmBind, ::ConfirmationTask::Socket, Confirmation::Bind);
 
 /// Reply to a ReqClose. Will flush out all
 /// existing data.
@@ -138,7 +138,7 @@ pub struct CfmClose {
 	pub context: ::Context,
 }
 
-make_confirmation!(CfmClose, ::Confirmation::Socket, Confirmation::Close);
+make_confirmation!(CfmClose, ::ConfirmationTask::Socket, Confirmation::Close);
 
 /// Reply to a ReqSend. The data has not necessarily
 /// been sent, but it is safe to send some more data.
@@ -152,7 +152,7 @@ pub struct CfmSend {
 	pub context: ::Context,
 }
 
-make_confirmation!(CfmSend, ::Confirmation::Socket, Confirmation::Send);
+make_confirmation!(CfmSend, ::ConfirmationTask::Socket, Confirmation::Send);
 
 /// Indicates that a listening socket has been connected to.
 #[derive(Debug)]
@@ -165,7 +165,7 @@ pub struct IndConnected {
 	pub peer: net::SocketAddr,
 }
 
-make_indication!(IndConnected, ::Indication::Socket, Indication::Connected);
+make_indication!(IndConnected, ::IndicationTask::Socket, Indication::Connected);
 
 /// Indicates that a socket has been dropped.
 #[derive(Debug)]
@@ -174,7 +174,7 @@ pub struct IndDropped {
 	pub handle: ConnHandle,
 }
 
-make_indication!(IndDropped, ::Indication::Socket, Indication::Dropped);
+make_indication!(IndDropped, ::IndicationTask::Socket, Indication::Dropped);
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
@@ -188,7 +188,7 @@ pub struct IndReceived {
 	pub data: Vec<u8>,
 }
 
-make_indication!(IndReceived, ::Indication::Socket, Indication::Received);
+make_indication!(IndReceived, ::IndicationTask::Socket, Indication::Received);
 
 /// Tell the task that more data can now be sent.
 #[derive(Debug)]
@@ -197,7 +197,7 @@ pub struct RspReceived {
 	pub handle: ConnHandle,
 }
 
-make_response!(RspReceived, ::Response::Socket, Response::Received);
+make_response!(RspReceived, ::ResponseTask::Socket, Response::Received);
 
 // ****************************************************************************
 //
@@ -435,10 +435,10 @@ impl TaskContext {
 	fn handle_message(&mut self, msg: ::Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(reply_to, ::Request::Socket(x)) => {
+			::Message::Request(reply_to, ::RequestTask::Socket(x)) => {
 				self.handle_socket_req(x, &reply_to)
 			}
-			::Message::Response(::Response::Socket(x)) => self.handle_socket_rsp(x),
+			::Message::Response(::ResponseTask::Socket(x)) => self.handle_socket_rsp(x),
 			// We don't expect any Indications or Confirmations from other providers
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in socket task: {:?}", msg),
@@ -814,7 +814,7 @@ mod test {
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
 			}
@@ -836,7 +836,7 @@ mod test {
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_err());
 			}
@@ -858,7 +858,7 @@ mod test {
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(6666));
 				assert!(x.result.is_err());
 			}
@@ -879,7 +879,7 @@ mod test {
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
@@ -891,7 +891,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -903,7 +903,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
@@ -923,7 +923,7 @@ mod test {
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8002 = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
@@ -937,7 +937,7 @@ mod test {
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8003 = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
@@ -950,7 +950,7 @@ mod test {
 
 		// Check we get an IndConnected, twice
 		let conn_handle8003 = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8003);
 				assert_eq!(x.peer, stream8003.local_addr().unwrap());
 				x.conn_handle
@@ -958,7 +958,7 @@ mod test {
 			_ => panic!("Bad match"),
 		};
 		let conn_handle8002 = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8002);
 				assert_eq!(x.peer, stream8002.local_addr().unwrap());
 				x.conn_handle
@@ -971,7 +971,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle8002);
 			}
 			_ => panic!("Bad match"),
@@ -982,7 +982,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle8003);
 			}
 			_ => panic!("Bad match"),
@@ -1010,7 +1010,7 @@ mod test {
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
@@ -1022,7 +1022,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -1041,7 +1041,7 @@ mod test {
 		// Check we get data, in pieces of arbitrary length
 		while rx_data.len() < data.len() {
 			match test_rx.recv() {
-				::Message::Indication(::Indication::Socket(Indication::Received(ref x))) => {
+				::Message::Indication(::IndicationTask::Socket(Indication::Received(ref x))) => {
 					assert_eq!(x.handle, conn_handle);
 					rx_data.append(&mut x.data.clone());
 					socket_thread.send_nonrequest(RspReceived { handle: x.handle });
@@ -1058,7 +1058,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
@@ -1079,7 +1079,7 @@ mod test {
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ::Context(5678));
 				x.result.unwrap()
 			}
@@ -1091,7 +1091,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -1133,7 +1133,7 @@ mod test {
 
 		// Check we get cfm
 		match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Send(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Socket(Confirmation::Send(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 				if let Ok(len) = x.result {
 					assert_eq!(len, data.len())
@@ -1149,7 +1149,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			::Message::Indication(::IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),

@@ -83,7 +83,7 @@ fn main() {
 	for msg in rx.iter() {
 		grease::MessageReceiver::render(&msg);
 		match msg {
-			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Received(ind))) => {
+			grease::Message::Indication(grease::IndicationTask::Socket(socket::Indication::Received(ind))) => {
 				std::thread::sleep(std::time::Duration::from_millis(500));
 				let recv_rsp = socket::RspReceived { handle: ind.handle };
 				socket_thread.send_nonrequest(recv_rsp);
@@ -95,14 +95,14 @@ fn main() {
 				};
 				socket_thread.send_request(send_req, &tx);
 			}
-			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Connected(ind))) => {
+			grease::Message::Indication(grease::IndicationTask::Socket(socket::Indication::Connected(ind))) => {
 				info!(
 					"Got connection from {}, handle = {}",
 					ind.peer,
 					ind.conn_handle
 				);
 			}
-			grease::Message::Indication(grease::Indication::Socket(socket::Indication::Dropped(ind))) => {
+			grease::Message::Indication(grease::IndicationTask::Socket(socket::Indication::Dropped(ind))) => {
 				info!("Connection dropped, handle = {}", ind.handle);
 			}
 			_ => {}

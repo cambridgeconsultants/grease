@@ -68,13 +68,13 @@
 ///
 /// ```ignore
 /// mod foo {
-///     make_request(ReqOpen, grease::Request::Foo, Request::Open)
+///     make_request!(ReqOpen, grease::RequestTask::Foo, Request::Open)
 /// }
 /// ```
 ///
-/// Where `ReqOpen` is the name of a struct, `grease::Request::Foo` is the
-/// member of `grease::Request` representing the `foo` module, and
-/// `Request::Open` is the member of the `Request` enum representing
+/// Where `ReqOpen` is the name of a struct, `grease::RequestTask::Foo` is the
+/// member of `grease::RequestTask` representing the `foo` module, and
+/// `Request::Open` is the member of the local `Request` enum representing
 /// a `ReqOpen` message.
 #[macro_export]
 macro_rules! make_request(
@@ -93,12 +93,14 @@ macro_rules! make_request(
 ///
 /// ```ignore
 /// mod foo {
-/// make_confirmation(CfmOpen, grease::Confirmation::Foo,
-/// Confirmation::Open)
+/// 	make_confirmation!(
+///			CfmOpen,
+///			grease::ConfirmationTask::Foo,
+/// 		Confirmation::Open);
 /// }
 /// ```
 ///
-/// Where `CfmOpen` is the name of a struct, `grease::Confirmation::Foo` is
+/// Where `CfmOpen` is the name of a struct, `grease::ConfirmationTask::Foo` is
 /// the member of `grease::Confirmation` representing the `foo` module, and
 /// `Confirmation::Open` is the member of the `Confirmation` enum
 /// representing a `CfmOpen` message.
@@ -118,12 +120,14 @@ macro_rules! make_confirmation(
 ///
 /// ```ignore
 /// mod foo {
-/// make_indication(IndConnected, grease::Indication::Foo,
-/// Indication::Connected)
+/// 	make_indication!(
+///			IndConnected,
+///			grease::IndicationTask::Foo,
+/// 		Indication::Connected);
 /// }
 /// ```
 ///
-/// Where `IndConnected` is the name of a struct, `grease::Indication::Foo` is
+/// Where `IndConnected` is the name of a struct, `grease::IndicationTask::Foo` is
 /// the member of the `grease::Indication` enum representing the `foo` module,
 /// and `Indication::Connected` is the member of the `Indication`
 /// enum representing a `IndConnected` message.
@@ -143,11 +147,14 @@ macro_rules! make_indication(
 ///
 /// ```ignore
 /// mod foo {
-///     make_response(RspConnected, grease::Response::Foo, Response::Connected)
+///     make_response(
+///			RspConnected,
+///			grease::ResponseTask::Foo,
+///			Response::Connected);
 /// }
 /// ```
 ///
-/// Where `RspConnected` is the name of a struct, `grease::Response::Foo` is
+/// Where `RspConnected` is the name of a struct, `grease::ResponseTask::Foo` is
 /// the member of `grease::Response` representing the `foo` module, and
 /// `Response::Connected` is the member of the `Response` enum representing a
 /// `RspConnected` message.
@@ -259,17 +266,17 @@ pub struct ReplyContext {
 /// object that should be used to send the confirmation in reply.
 #[derive(Debug)]
 pub enum Message {
-	Request(MessageSender, Request),
-	Confirmation(Confirmation),
-	Indication(Indication),
-	Response(Response),
+	Request(MessageSender, RequestTask),
+	Confirmation(ConfirmationTask),
+	Indication(IndicationTask),
+	Response(ResponseTask),
 }
 
 /// The set of all requests in the system. This is an enumeration of all the
 /// services that can handle requests. The enum included within each service is
 /// probably defined in that service's module.
 #[derive(Debug)]
-pub enum Request {
+pub enum RequestTask {
 	Http(http::Request),
 	Socket(socket::Request),
 	WebServ(webserv::Request),
@@ -279,7 +286,7 @@ pub enum Request {
 /// `Request` but as `CfmXXX` instead of `ReqXXX`. These are handled by tasks
 /// that send requests - you send a request and you get a confirmation back.
 #[derive(Debug)]
-pub enum Confirmation {
+pub enum ConfirmationTask {
 	Http(http::Confirmation),
 	Socket(socket::Confirmation),
 	WebServ(webserv::Confirmation),
@@ -289,7 +296,7 @@ pub enum Confirmation {
 /// services that can send indications. The enum included within each
 /// service is probably defined in that service's module.
 #[derive(Debug)]
-pub enum Indication {
+pub enum IndicationTask {
 	Http(http::Indication),
 	Socket(socket::Indication),
 	WebServ(webserv::Indication),
@@ -299,7 +306,7 @@ pub enum Indication {
 /// services that need responses (which is actually quite rare). The enum
 /// included within each service is probably defined in that service's module.
 #[derive(Debug)]
-pub enum Response {
+pub enum ResponseTask {
 	Socket(socket::Response),
 }
 

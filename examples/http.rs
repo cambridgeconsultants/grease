@@ -87,7 +87,7 @@ fn main() {
 	for msg in rx.iter() {
 		grease::MessageReceiver::render(&msg);
 		match msg {
-			grease::Message::Indication(grease::Indication::Http(http::Indication::RxRequest(ref ind))) => {
+			grease::Message::Indication(grease::IndicationTask::Http(http::Indication::RxRequest(ref ind))) => {
                 let body_msg = format!("This is test {}\r\n", n);
                 info!("Got HTTP request {:?} {}", ind.method, ind.url);
                 let ctx = n.take();

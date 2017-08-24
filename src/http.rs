@@ -97,7 +97,7 @@ pub struct ReqBind {
 	pub context: ::Context,
 }
 
-make_request!(ReqBind, ::Request::Http, Request::Bind);
+make_request!(ReqBind, ::RequestTask::Http, Request::Bind);
 
 /// Send the headers for an HTTP response. Host, Content-Length
 /// and Content-Type are automatically added from the relevant fields
@@ -124,7 +124,7 @@ pub struct ReqResponseStart {
 	pub headers: HashMap<String, String>,
 }
 
-make_request!(ReqResponseStart, ::Request::Http, Request::ResponseStart);
+make_request!(ReqResponseStart, ::RequestTask::Http, Request::ResponseStart);
 
 /// Send some body content for an HTTP response. Must be proceeded
 /// by ReqResponseStart to send the headers.
@@ -138,7 +138,7 @@ pub struct ReqResponseBody {
 	pub data: Vec<u8>,
 }
 
-make_request!(ReqResponseBody, ::Request::Http, Request::ResponseBody);
+make_request!(ReqResponseBody, ::RequestTask::Http, Request::ResponseBody);
 
 /// Whether the ReqBind was successfull
 #[derive(Debug)]
@@ -147,7 +147,7 @@ pub struct CfmBind {
 	pub result: Result<ServerHandle, Error>,
 }
 
-make_confirmation!(CfmBind, ::Confirmation::Http, Confirmation::Bind);
+make_confirmation!(CfmBind, ::ConfirmationTask::Http, Confirmation::Bind);
 
 /// Whether the ReqResponseStart was successfull
 #[derive(Debug)]
@@ -159,7 +159,7 @@ pub struct CfmResponseStart {
 
 make_confirmation!(
 	CfmResponseStart,
-	::Confirmation::Http,
+	::ConfirmationTask::Http,
 	Confirmation::ResponseStart
 );
 
@@ -173,7 +173,7 @@ pub struct CfmResponseBody {
 
 make_confirmation!(
 	CfmResponseBody,
-	::Confirmation::Http,
+	::ConfirmationTask::Http,
 	Confirmation::ResponseBody
 );
 
@@ -187,7 +187,7 @@ pub struct IndRxRequest {
 	pub headers: HashMap<String, String>,
 }
 
-make_indication!(IndRxRequest, ::Indication::Http, Indication::RxRequest);
+make_indication!(IndRxRequest, ::IndicationTask::Http, Indication::RxRequest);
 
 /// An HTTP connection has been dropped
 #[derive(Debug)]
@@ -195,7 +195,7 @@ pub struct IndClosed {
 	pub handle: ConnHandle,
 }
 
-make_indication!(IndClosed, ::Indication::Http, Indication::Closed);
+make_indication!(IndClosed, ::IndicationTask::Http, Indication::Closed);
 
 // ****************************************************************************
 //
@@ -388,12 +388,12 @@ impl TaskContext {
 	fn handle(&mut self, msg: ::Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(ref reply_to, ::Request::Http(ref x)) => {
+			::Message::Request(ref reply_to, ::RequestTask::Http(ref x)) => {
 				self.handle_http_req(x, reply_to)
 			}
 			// We use the socket task so we expect to get confirmations and indications from it
-			::Message::Confirmation(::Confirmation::Socket(ref x)) => self.handle_socket_cfm(x),
-			::Message::Indication(::Indication::Socket(ref x)) => self.handle_socket_ind(x),
+			::Message::Confirmation(::ConfirmationTask::Socket(ref x)) => self.handle_socket_cfm(x),
+			::Message::Indication(::IndicationTask::Socket(ref x)) => self.handle_socket_ind(x),
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in http task: {:?}", msg),
 		}
@@ -875,7 +875,7 @@ mod test {
 		http_thread.send_request(bind_req, &this_thread);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Request(ref reply_to, ::Request::Socket(socket::Request::Bind(ref x))) => {
+			::Message::Request(ref reply_to, ::RequestTask::Socket(socket::Request::Bind(ref x))) => {
 				assert_eq!(x.addr, addr);
 				let bind_cfm = socket::CfmBind {
 					result: Ok(socket_handle),
@@ -887,7 +887,7 @@ mod test {
 		}
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ctx);
 				if let Ok(h) = x.result {
 					h
@@ -933,7 +933,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
+			::Message::Indication(::IndicationTask::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::Method::Get);
@@ -947,7 +947,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
+			::Message::Response(::ResponseTask::Socket(socket::Response::Received(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -972,7 +972,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Send(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
 				               text/plain\r\nX-Magic: frobbins\r\n\r\n"
@@ -990,7 +990,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseStart(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
 				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
@@ -1011,7 +1011,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Send(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
@@ -1026,7 +1026,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
 				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
@@ -1046,7 +1046,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Close(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Close(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
@@ -1060,7 +1060,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
 				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
@@ -1072,7 +1072,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Indication(::Indication::Http(Indication::Closed(ref x))) => {
+			::Message::Indication(::IndicationTask::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1108,7 +1108,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
+			::Message::Indication(::IndicationTask::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::Method::Get);
@@ -1122,7 +1122,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Response(::Response::Socket(socket::Response::Received(ref x))) => {
+			::Message::Response(::ResponseTask::Socket(socket::Response::Received(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1147,7 +1147,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Send(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
 				               24\r\nContent-Type: text/plain\r\nX-Magic: frobbins\r\n\r\n"
@@ -1166,7 +1166,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseStart(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
 				assert_eq!(x.context, ::Context(1234));
 				assert!(x.result.is_ok());
@@ -1187,7 +1187,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Send(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
@@ -1202,7 +1202,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::Confirmation::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
 				assert_eq!(x.context, ::Context(5678));
 				assert!(x.result.is_ok());
@@ -1215,7 +1215,7 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::Request::Socket(socket::Request::Close(ref x))) => {
+			                   ::RequestTask::Socket(socket::Request::Close(ref x))) => {
 				assert_eq!(x.handle, ::Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
@@ -1231,7 +1231,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Indication(::Indication::Http(Indication::Closed(ref x))) => {
+			::Message::Indication(::IndicationTask::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
 			_ => panic!("Bad match: {:?}", msg),
