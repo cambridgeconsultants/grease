@@ -94,8 +94,8 @@ macro_rules! make_request(
 /// ```ignore
 /// mod foo {
 /// 	make_confirmation!(
-///			CfmOpen,
-///			grease::ConfirmationTask::Foo,
+/// 			CfmOpen,
+/// 			grease::ConfirmationTask::Foo,
 /// 		Confirmation::Open);
 /// }
 /// ```
@@ -121,8 +121,8 @@ macro_rules! make_confirmation(
 /// ```ignore
 /// mod foo {
 /// 	make_indication!(
-///			IndConnected,
-///			grease::IndicationTask::Foo,
+/// 			IndConnected,
+/// 			grease::IndicationTask::Foo,
 /// 		Indication::Connected);
 /// }
 /// ```
@@ -148,9 +148,9 @@ macro_rules! make_indication(
 /// ```ignore
 /// mod foo {
 ///     make_response(
-///			RspConnected,
-///			grease::ResponseTask::Foo,
-///			Response::Connected);
+/// 			RspConnected,
+/// 			grease::ResponseTask::Foo,
+/// 			Response::Connected);
 /// }
 /// ```
 ///
@@ -231,14 +231,14 @@ pub struct MessageReceiver(mpsc::Receiver<Message>);
 pub struct Context(usize);
 
 impl Default for Context {
-    fn default() -> Context {
-        Context(0)
-    }
+	fn default() -> Context {
+		Context(0)
+	}
 }
 
 impl std::fmt::Display for Context {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Context({})", self.0)
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "Context({})", self.0)
 	}
 }
 

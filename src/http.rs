@@ -48,6 +48,7 @@ use rushttp;
 use socket;
 use socket::User as SocketUser;
 use prelude::*;
+use super::{Context, ConfirmationTask, IndicationTask, MessageReceiver, MessageSender, RequestTask};
 
 pub use rushttp::response::HttpResponseStatus;
 
@@ -94,10 +95,10 @@ pub struct ReqBind {
 	/// Which address to bind.
 	pub addr: net::SocketAddr,
 	/// Reflected back in the cfm, and in subsequent IndRxRequest
-	pub context: ::Context,
+	pub context: Context,
 }
 
-make_request!(ReqBind, ::RequestTask::Http, Request::Bind);
+make_request!(ReqBind, RequestTask::Http, Request::Bind);
 
 /// Send the headers for an HTTP response. Host, Content-Length
 /// and Content-Type are automatically added from the relevant fields
@@ -112,7 +113,7 @@ pub struct ReqResponseStart {
 	/// Which HTTP connection to start a response on
 	pub handle: ConnHandle,
 	/// Reflected back in the cfm
-	pub context: ::Context,
+	pub context: Context,
 	/// Status code
 	pub status: HttpResponseStatus,
 	/// Content-Type for the response, e.g. "text/html"
@@ -124,7 +125,7 @@ pub struct ReqResponseStart {
 	pub headers: HashMap<String, String>,
 }
 
-make_request!(ReqResponseStart, ::RequestTask::Http, Request::ResponseStart);
+make_request!(ReqResponseStart, RequestTask::Http, Request::ResponseStart);
 
 /// Send some body content for an HTTP response. Must be proceeded
 /// by ReqResponseStart to send the headers.
@@ -133,33 +134,33 @@ pub struct ReqResponseBody {
 	/// Which HTTP connection to send some response body on
 	pub handle: ConnHandle,
 	/// Reflected back in the cfm
-	pub context: ::Context,
+	pub context: Context,
 	/// Some data
 	pub data: Vec<u8>,
 }
 
-make_request!(ReqResponseBody, ::RequestTask::Http, Request::ResponseBody);
+make_request!(ReqResponseBody, RequestTask::Http, Request::ResponseBody);
 
 /// Whether the ReqBind was successfull
 #[derive(Debug)]
 pub struct CfmBind {
-	pub context: ::Context,
+	pub context: Context,
 	pub result: Result<ServerHandle, Error>,
 }
 
-make_confirmation!(CfmBind, ::ConfirmationTask::Http, Confirmation::Bind);
+make_confirmation!(CfmBind, ConfirmationTask::Http, Confirmation::Bind);
 
 /// Whether the ReqResponseStart was successfull
 #[derive(Debug)]
 pub struct CfmResponseStart {
 	pub handle: ConnHandle,
-	pub context: ::Context,
+	pub context: Context,
 	pub result: Result<(), Error>,
 }
 
 make_confirmation!(
 	CfmResponseStart,
-	::ConfirmationTask::Http,
+	ConfirmationTask::Http,
 	Confirmation::ResponseStart
 );
 
@@ -167,13 +168,13 @@ make_confirmation!(
 #[derive(Debug)]
 pub struct CfmResponseBody {
 	pub handle: ConnHandle,
-	pub context: ::Context,
+	pub context: Context,
 	pub result: Result<(), Error>,
 }
 
 make_confirmation!(
 	CfmResponseBody,
-	::ConfirmationTask::Http,
+	ConfirmationTask::Http,
 	Confirmation::ResponseBody
 );
 
@@ -187,7 +188,7 @@ pub struct IndRxRequest {
 	pub headers: HashMap<String, String>,
 }
 
-make_indication!(IndRxRequest, ::IndicationTask::Http, Indication::RxRequest);
+make_indication!(IndRxRequest, IndicationTask::Http, Indication::RxRequest);
 
 /// An HTTP connection has been dropped
 #[derive(Debug)]
@@ -195,7 +196,7 @@ pub struct IndClosed {
 	pub handle: ConnHandle,
 }
 
-make_indication!(IndClosed, ::IndicationTask::Http, Indication::Closed);
+make_indication!(IndClosed, IndicationTask::Http, Indication::Closed);
 
 // ****************************************************************************
 //
@@ -244,10 +245,10 @@ pub trait User {
 }
 
 /// A new one of these is allocated for every new HTTP server
-pub type ServerHandle = ::Context;
+pub type ServerHandle = Context;
 
 /// A new one of these is allocated for every new HTTP request
-pub type ConnHandle = ::Context;
+pub type ConnHandle = Context;
 
 /// All possible http task errors
 #[derive(Debug, Copy, Clone)]
@@ -285,8 +286,8 @@ enum CfmType {
 /// for a Cfm from the socket task, use a PendingCfm to store
 /// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
-	reply_to: ::MessageSender,
-	context: ::Context,
+	reply_to: MessageSender,
+	context: Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
 	/// If true, close the socket when this cfm comes in
@@ -302,7 +303,7 @@ struct Server {
 	/// The handle by which the upper layer refers to us
 	our_handle: ServerHandle,
 	/// Who to tell about the new connections we get
-	ind_to: ::MessageSender,
+	ind_to: MessageSender,
 }
 
 struct Connection {
@@ -323,18 +324,18 @@ struct Connection {
 
 struct TaskContext {
 	/// Who we send socket messages to
-	socket: ::MessageSender,
+	socket: MessageSender,
 	/// How other tasks send messages to us
-	reply_to: ::MessageSender,
+	reply_to: MessageSender,
 	/// Our list of servers, indexed by the handle given in CfmBind
 	servers: MultiMap<ServerHandle, Option<socket::ListenHandle>, Server>,
 	/// Our list of connections, indexed by the handle given in IndRxRequest
 	connections: MultiMap<ConnHandle, socket::ConnHandle, Connection>,
 	/// The next context we use for downward messages
-	next_ctx: ::Context,
+	next_ctx: Context,
 	/// Cfms we haven't sent yet, indexed by the unique context ID we
 	/// send to the socket task.
-	pending: HashMap<::Context, PendingCfm>,
+	pending: HashMap<Context, PendingCfm>,
 }
 
 // ****************************************************************************
@@ -345,9 +346,9 @@ struct TaskContext {
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
+pub fn make_task(socket: &MessageSender) -> MessageSender {
 	let local_socket = socket.clone();
-	::make_task("http", move |rx: ::MessageReceiver, tx: ::MessageSender| {
+	::make_task("http", move |rx: MessageReceiver, tx: MessageSender| {
 		main_loop(rx, tx, local_socket)
 	})
 }
@@ -359,10 +360,10 @@ pub fn make_task(socket: &::MessageSender) -> ::MessageSender {
 // ****************************************************************************
 
 /// The task runs this main loop indefinitely.
-fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, socket: ::MessageSender) {
+fn main_loop(rx: MessageReceiver, tx: MessageSender, socket: MessageSender) {
 	let mut t = TaskContext::new(socket, tx);
 	for msg in rx.iter() {
-		::MessageReceiver::render(&msg);
+		MessageReceiver::render(&msg);
 		t.handle(msg);
 	}
 	panic!("This task should never die!");
@@ -371,14 +372,14 @@ fn main_loop(rx: ::MessageReceiver, tx: ::MessageSender, socket: ::MessageSender
 /// All our handler functions are methods on this TaskContext structure.
 impl TaskContext {
 	/// Create a new TaskContext
-	fn new(socket: ::MessageSender, us: ::MessageSender) -> TaskContext {
+	fn new(socket: MessageSender, us: MessageSender) -> TaskContext {
 		TaskContext {
 			socket: socket,
 			servers: MultiMap::new(),
 			connections: MultiMap::new(),
 			reply_to: us,
 			// This number is arbitrary
-			next_ctx: ::Context(2_000),
+			next_ctx: Context(2_000),
 			pending: HashMap::new(),
 		}
 	}
@@ -388,18 +389,18 @@ impl TaskContext {
 	fn handle(&mut self, msg: ::Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(ref reply_to, ::RequestTask::Http(ref x)) => {
+			::Message::Request(ref reply_to, RequestTask::Http(ref x)) => {
 				self.handle_http_req(x, reply_to)
 			}
 			// We use the socket task so we expect to get confirmations and indications from it
-			::Message::Confirmation(::ConfirmationTask::Socket(ref x)) => self.handle_socket_cfm(x),
-			::Message::Indication(::IndicationTask::Socket(ref x)) => self.handle_socket_ind(x),
+			::Message::Confirmation(ConfirmationTask::Socket(ref x)) => self.handle_socket_cfm(x),
+			::Message::Indication(IndicationTask::Socket(ref x)) => self.handle_socket_ind(x),
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in http task: {:?}", msg),
 		}
 	}
 
-	fn handle_http_req(&mut self, req: &Request, reply_to: &::MessageSender) {
+	fn handle_http_req(&mut self, req: &Request, reply_to: &MessageSender) {
 		match *req {
 			Request::Bind(ref x) => self.handle_bind(x, reply_to),
 			Request::ResponseStart(ref x) => self.handle_responsestart(x, reply_to),
@@ -407,7 +408,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_bind(&mut self, req_bind: &ReqBind, reply_to: &::MessageSender) {
+	fn handle_bind(&mut self, req_bind: &ReqBind, reply_to: &MessageSender) {
 		let reply_ctx = ::ReplyContext {
 			context: req_bind.context,
 			reply_to: reply_to.clone(),
@@ -500,7 +501,7 @@ impl TaskContext {
 	}
 
 	/// @todo We should we check they call this once and only once.
-	fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &::MessageSender) {
+	fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &MessageSender) {
 		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
 
 			let skt = {
@@ -542,7 +543,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_responsebody(&mut self, req_body: &ReqResponseBody, reply_to: &::MessageSender) {
+	fn handle_responsebody(&mut self, req_body: &ReqResponseBody, reply_to: &MessageSender) {
 		if self.get_conn_by_http_handle(&req_body.handle).is_some() {
 
 			let mut close_after = false;
@@ -639,7 +640,7 @@ impl TaskContext {
 		if let Ok(_) = r.write(&mut output) {
 			let req = socket::ReqSend {
 				handle: *handle,
-				context: ::Context::default(),
+				context: Context::default(),
 				data: output,
 			};
 			self.socket.send_request(req, &self.reply_to);
@@ -649,7 +650,7 @@ impl TaskContext {
 
 		let close_req = socket::ReqClose {
 			handle: *handle,
-			context: ::Context::default(),
+			context: Context::default(),
 		};
 		self.socket.send_request(close_req, &self.reply_to);
 	}
@@ -855,16 +856,17 @@ impl SocketUser for TaskContext {
 #[cfg(test)]
 mod test {
 	use super::*;
+	use super::super::ResponseTask;
 	use socket;
 	use rushttp;
 	use std::collections::HashMap;
 
 	fn bind_port(
-		this_thread: &::MessageSender,
-		test_rx: &::MessageReceiver,
-		http_thread: &::MessageSender,
+		this_thread: &MessageSender,
+		test_rx: &MessageReceiver,
+		http_thread: &MessageSender,
 		addr: &str,
-		ctx: ::Context,
+		ctx: Context,
 		socket_handle: socket::ListenHandle,
 	) -> ServerHandle {
 		let addr = addr.parse().unwrap();
@@ -875,7 +877,7 @@ mod test {
 		http_thread.send_request(bind_req, &this_thread);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Request(ref reply_to, ::RequestTask::Socket(socket::Request::Bind(ref x))) => {
+			::Message::Request(ref reply_to, RequestTask::Socket(socket::Request::Bind(ref x))) => {
 				assert_eq!(x.addr, addr);
 				let bind_cfm = socket::CfmBind {
 					result: Ok(socket_handle),
@@ -887,7 +889,7 @@ mod test {
 		}
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::Bind(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::Bind(ref x))) => {
 				assert_eq!(x.context, ctx);
 				if let Ok(h) = x.result {
 					h
@@ -904,7 +906,14 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let _ = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8000", ::Context(1), ::Context(2));
+		let _ = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_thread,
+			"127.0.1.1:8000",
+			Context(1),
+			Context(2),
+		);
 	}
 
 	#[test]
@@ -912,13 +921,20 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", ::Context(3), ::Context(4));
+		let sh = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_thread,
+			"127.0.1.1:8001",
+			Context(3),
+			Context(4),
+		);
 
 		// ******************** Connection opens ********************
 
 		let msg = socket::IndConnected {
-			listen_handle: ::Context(4),
-			conn_handle: ::Context(5),
+			listen_handle: Context(4),
+			conn_handle: Context(5),
 			peer: "127.0.0.1:56789".parse().unwrap(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -926,14 +942,14 @@ mod test {
 		// ******************** Request arrives ********************
 
 		let msg = socket::IndReceived {
-			handle: ::Context(5),
+			handle: Context(5),
 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
 		};
 		http_thread.send_nonrequest(msg);
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::IndicationTask::Http(Indication::RxRequest(ref x))) => {
+			::Message::Indication(IndicationTask::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::Method::Get);
@@ -947,8 +963,8 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Response(::ResponseTask::Socket(socket::Response::Received(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			::Message::Response(ResponseTask::Socket(socket::Response::Received(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
 		};
@@ -957,7 +973,7 @@ mod test {
 
 		let mut msg = ReqResponseStart {
 			handle: ch,
-			context: ::Context(1234),
+			context: Context(1234),
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: None,
@@ -972,8 +988,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
 				               text/plain\r\nX-Magic: frobbins\r\n\r\n"
 					.as_bytes();
@@ -990,9 +1006,9 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, ::Context(1234));
+				assert_eq!(x.context, Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1003,7 +1019,7 @@ mod test {
 		let test_body = Vec::from("One two, Rust on my shoe");
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: ::Context(5678),
+			context: Context(5678),
 			data: test_body.clone(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1011,8 +1027,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
 					handle: x.handle,
@@ -1026,9 +1042,9 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, ::Context(5678));
+				assert_eq!(x.context, Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1038,7 +1054,7 @@ mod test {
 
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: ::Context(5678),
+			context: Context(5678),
 			data: Vec::new(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1046,8 +1062,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Close(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Close(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
 					context: x.context,
@@ -1060,9 +1076,9 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, ::Context(5678));
+				assert_eq!(x.context, Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1072,7 +1088,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Indication(::IndicationTask::Http(Indication::Closed(ref x))) => {
+			::Message::Indication(IndicationTask::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1087,13 +1103,20 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		// Use ourselves as the 'socket' task
 		let http_thread = make_task(&reply_to);
-		let sh = bind_port(&reply_to, &test_rx, &http_thread, "127.0.1.1:8001", ::Context(3), ::Context(4));
+		let sh = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_thread,
+			"127.0.1.1:8001",
+			Context(3),
+			Context(4),
+		);
 
 		// ******************** Connection opens ********************
 
 		let msg = socket::IndConnected {
-			listen_handle: ::Context(4),
-			conn_handle: ::Context(5),
+			listen_handle: Context(4),
+			conn_handle: Context(5),
 			peer: "127.0.0.1:56789".parse().unwrap(),
 		};
 		http_thread.send_nonrequest(msg);
@@ -1101,14 +1124,14 @@ mod test {
 		// ******************** Request arrives ********************
 
 		let msg = socket::IndReceived {
-			handle: ::Context(5),
+			handle: Context(5),
 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
 		};
 		http_thread.send_nonrequest(msg);
 
 		let msg = test_rx.recv();
 		let ch = match msg {
-			::Message::Indication(::IndicationTask::Http(Indication::RxRequest(ref x))) => {
+			::Message::Indication(IndicationTask::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
 				assert_eq!(x.method, rushttp::Method::Get);
@@ -1122,8 +1145,8 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Response(::ResponseTask::Socket(socket::Response::Received(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			::Message::Response(ResponseTask::Socket(socket::Response::Received(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 			}
 			_ => panic!("Bad match: {:?}", msg),
 		};
@@ -1132,7 +1155,7 @@ mod test {
 
 		let mut msg = ReqResponseStart {
 			handle: ch,
-			context: ::Context(1234),
+			context: Context(1234),
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: Some(24),
@@ -1147,8 +1170,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
 				               24\r\nContent-Type: text/plain\r\nX-Magic: frobbins\r\n\r\n"
 					.as_bytes();
@@ -1166,9 +1189,9 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::ResponseStart(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, ::Context(1234));
+				assert_eq!(x.context, Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1179,7 +1202,7 @@ mod test {
 		let test_body = Vec::from("One two, Rust on my shoe");
 		let msg = ReqResponseBody {
 			handle: ch,
-			context: ::Context(5678),
+			context: Context(5678),
 			data: test_body.clone(),
 		};
 		http_thread.send_request(msg, &reply_to);
@@ -1187,8 +1210,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Send(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
 					handle: x.handle,
@@ -1202,9 +1225,9 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Confirmation(::ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
+			::Message::Confirmation(ConfirmationTask::Http(Confirmation::ResponseBody(ref x))) => {
 				assert_eq!(x.handle, ch);
-				assert_eq!(x.context, ::Context(5678));
+				assert_eq!(x.context, Context(5678));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match: {:?}", msg),
@@ -1215,8 +1238,8 @@ mod test {
 		let msg = test_rx.recv();
 		match msg {
 			::Message::Request(ref msg_reply_to,
-			                   ::RequestTask::Socket(socket::Request::Close(ref x))) => {
-				assert_eq!(x.handle, ::Context(5));
+			                   RequestTask::Socket(socket::Request::Close(ref x))) => {
+				assert_eq!(x.handle, Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
 					context: x.context,
@@ -1231,7 +1254,7 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Indication(::IndicationTask::Http(Indication::Closed(ref x))) => {
+			::Message::Indication(IndicationTask::Http(Indication::Closed(ref x))) => {
 				assert_eq!(x.handle, ch);
 			}
 			_ => panic!("Bad match: {:?}", msg),
