@@ -50,6 +50,7 @@ use socket::User as SocketUser;
 use prelude::*;
 
 pub use rushttp::response::HttpResponseStatus;
+pub use rushttp::{Uri, Method, HeaderMap};
 
 // ****************************************************************************
 //
@@ -121,7 +122,7 @@ pub struct ReqResponseStart {
 	/// If not Some(0), then send some ReqResponseBody next.
 	pub length: Option<usize>,
 	/// Any other headers required.
-	pub headers: HashMap<String, String>,
+	pub headers: HeaderMap,
 }
 
 make_request!(ReqResponseStart, ::Request::Http, Request::ResponseStart);
@@ -182,9 +183,9 @@ make_confirmation!(
 pub struct IndRxRequest {
 	pub server_handle: ServerHandle,
 	pub connection_handle: ConnHandle,
-	pub url: String,
-	pub method: rushttp::Method,
-	pub headers: HashMap<String, String>,
+	pub url: Uri,
+	pub method: Method,
+	pub headers: HeaderMap,
 }
 
 make_indication!(IndRxRequest, ::Indication::Http, Indication::RxRequest);
@@ -486,7 +487,7 @@ impl TaskContext {
 		status: HttpResponseStatus,
 		content_type: &str,
 		length: Option<usize>,
-		headers: &HashMap<String, String>,
+		headers: &HeaderMap,
 	) -> String {
 		let mut s = String::new();
 		s.push_str(&format!("HTTP/1.1 {}\r\n", status));
@@ -502,7 +503,7 @@ impl TaskContext {
 			s.push_str(&format!("Content-Type: {}\r\n", content_type));
 		}
 		for (k, v) in headers.iter() {
-			s.push_str(&format!("{}: {}\r\n", k, v));
+			s.push_str(&format!("{}: {}\r\n", k.as_str(), v.to_str().unwrap()));
 		}
 		s.push_str("\r\n");
 		return s;
@@ -638,7 +639,7 @@ impl TaskContext {
 	fn send_response(
 		&self,
 		handle: &socket::ConnHandle,
-		code: rushttp::response::HttpResponseStatus,
+		code: HttpResponseStatus,
 		message: &str,
 	) {
 		// An error occured which we must tell them about
@@ -833,9 +834,9 @@ impl SocketUser for TaskContext {
 				let conn_ind = IndRxRequest {
 					server_handle: sh,
 					connection_handle: ch,
-					url: req.url,
-					method: req.method,
-					headers: req.headers,
+					url: req.uri().clone(),
+					method: req.method().clone(),
+					headers: req.headers().clone(),
 				};
 				ind_to.send_nonrequest(conn_ind);
 			}
@@ -865,8 +866,6 @@ impl SocketUser for TaskContext {
 mod test {
 	use super::*;
 	use socket;
-	use rushttp;
-	use std::collections::HashMap;
 
 	fn bind_port(
 		this_thread: &::MessageSender,
@@ -945,9 +944,9 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
-				assert_eq!(x.method, rushttp::Method::Get);
-				let mut expected_headers = HashMap::new();
-				expected_headers.insert(String::from("Host"), String::from("localhost"));
+				assert_eq!(x.method, Method::GET);
+				let mut expected_headers = HeaderMap::new();
+				expected_headers.insert("HOST", "localhost".parse().unwrap());
 				assert_eq!(x.headers, expected_headers);
 				x.connection_handle
 			}
@@ -970,11 +969,11 @@ mod test {
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: None,
-			headers: HashMap::new(),
+			headers: HeaderMap::new(),
 		};
 		msg.headers.insert(
-			String::from("X-Magic"),
-			String::from("frobbins"),
+			"x-magic",
+			"frobbins".parse().unwrap(),
 		);
 		http_thread.send_request(msg, &reply_to);
 
@@ -984,7 +983,7 @@ mod test {
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, 5);
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
-				               text/plain\r\nX-Magic: frobbins\r\n\r\n"
+				               text/plain\r\nx-magic: frobbins\r\n\r\n"
 					.as_bytes();
 				assert_eq!(x.data, headers);
 				let send_cfm = socket::CfmSend {
@@ -1120,9 +1119,9 @@ mod test {
 			::Message::Indication(::Indication::Http(Indication::RxRequest(ref x))) => {
 				assert_eq!(x.server_handle, sh);
 				assert_eq!(x.url, "/foo/bar");
-				assert_eq!(x.method, rushttp::Method::Get);
-				let mut expected_headers = HashMap::new();
-				expected_headers.insert(String::from("Host"), String::from("localhost"));
+				assert_eq!(x.method, Method::GET);
+				let mut expected_headers = HeaderMap::new();
+				expected_headers.insert("Host", "localhost".parse().unwrap());
 				assert_eq!(x.headers, expected_headers);
 				x.connection_handle
 			}
@@ -1145,11 +1144,11 @@ mod test {
 			status: HttpResponseStatus::OK,
 			content_type: String::from("text/plain"),
 			length: Some(24),
-			headers: HashMap::new(),
+			headers: HeaderMap::new(),
 		};
 		msg.headers.insert(
-			String::from("X-Magic"),
-			String::from("frobbins"),
+			"x-magic",
+			"frobbins".parse().unwrap(),
 		);
 		http_thread.send_request(msg, &reply_to);
 
@@ -1159,7 +1158,7 @@ mod test {
 			                   ::Request::Socket(socket::Request::Send(ref x))) => {
 				assert_eq!(x.handle, 5);
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
-				               24\r\nContent-Type: text/plain\r\nX-Magic: frobbins\r\n\r\n"
+				               24\r\nContent-Type: text/plain\r\nx-magic: frobbins\r\n\r\n"
 					.as_bytes();
 				println!("Headers: {:?}", String::from_utf8(x.data.clone()));
 				assert_eq!(x.data, headers);

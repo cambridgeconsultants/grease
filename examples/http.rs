@@ -15,7 +15,6 @@ extern crate time;
 use std::env;
 use std::thread;
 use std::net;
-use std::collections::HashMap;
 
 use env_logger::LogBuilder;
 use grease::socket;
@@ -96,7 +95,7 @@ fn main() {
                     context: n,
                     content_type: String::from("text/plain"),
                     length: Some(body_msg.len()),
-                    headers: HashMap::new()
+                    headers: http::HeaderMap::new()
                 };
                 http_thread.send_request(start, &tx);
                 let body = http::ReqResponseBody {
