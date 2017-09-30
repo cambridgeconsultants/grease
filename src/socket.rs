@@ -26,6 +26,9 @@ use mio_more;
 
 use prelude::*;
 
+use super::{Context, ConfirmationTask, IndicationTask, Message, MessageReceiver, MessageSender,
+            RequestTask, ResponseTask};
+
 // ****************************************************************************
 //
 // Public Messages
@@ -56,7 +59,9 @@ pub enum Confirmation {
 	Send(Box<CfmSend>),
 }
 
-/// Asynchronous indications sent by the Socket task
+/// Asynchronous indications sent by the Socket task.
+/// TODO: Perhaps indicate EOF/HUP ind here? As distinct from dropping the
+/// connection handle (which would mean you couldn't write either).
 #[derive(Debug)]
 pub enum Indication {
 	/// A Connected Indication - Indicates that a listening socket has been
@@ -83,12 +88,12 @@ pub struct ReqBind {
 	/// The address to bind to
 	pub addr: net::SocketAddr,
 	/// Reflected in the cfm
-	pub context: ::Context,
+	pub context: Context,
 	/// Type of connection to bind
 	pub conn_type: ConnectionType,
 }
 
-make_request!(ReqBind, ::Request::Socket, Request::Bind);
+make_request!(ReqBind, RequestTask::Socket, Request::Bind);
 
 /// Close an open connection
 #[derive(Debug)]
@@ -96,22 +101,22 @@ pub struct ReqClose {
 	/// The handle from a IndConnected
 	pub handle: ConnHandle,
 	/// Reflected in the cfm
-	pub context: ::Context,
+	pub context: Context,
 }
 
-make_request!(ReqClose, ::Request::Socket, Request::Close);
+make_request!(ReqClose, RequestTask::Socket, Request::Close);
 
 /// Send something on a connection
 pub struct ReqSend {
 	/// The handle from a CfmBind
 	pub handle: ConnHandle,
 	/// Some (maybe) unique identifier
-	pub context: ::Context,
+	pub context: Context,
 	/// The data to be sent
 	pub data: Vec<u8>,
 }
 
-make_request!(ReqSend, ::Request::Socket, Request::Send);
+make_request!(ReqSend, RequestTask::Socket, Request::Send);
 
 /// Reply to a ReqBind.
 #[derive(Debug)]
@@ -119,10 +124,10 @@ pub struct CfmBind {
 	/// Either a new ListenHandle or an error
 	pub result: Result<ListenHandle, SocketError>,
 	/// Reflected from the req
-	pub context: ::Context,
+	pub context: Context,
 }
 
-make_confirmation!(CfmBind, ::Confirmation::Socket, Confirmation::Bind);
+make_confirmation!(CfmBind, ConfirmationTask::Socket, Confirmation::Bind);
 
 /// Reply to a ReqClose. Will flush out all
 /// existing data.
@@ -133,10 +138,10 @@ pub struct CfmClose {
 	/// Success or failed
 	pub result: Result<(), SocketError>,
 	/// Reflected from the req
-	pub context: ::Context,
+	pub context: Context,
 }
 
-make_confirmation!(CfmClose, ::Confirmation::Socket, Confirmation::Close);
+make_confirmation!(CfmClose, ConfirmationTask::Socket, Confirmation::Close);
 
 /// Reply to a ReqSend. The data has not necessarily
 /// been sent, but it is safe to send some more data.
@@ -147,10 +152,10 @@ pub struct CfmSend {
 	/// Amount sent or error
 	pub result: Result<usize, SocketError>,
 	/// Some (maybe) unique identifier
-	pub context: ::Context,
+	pub context: Context,
 }
 
-make_confirmation!(CfmSend, ::Confirmation::Socket, Confirmation::Send);
+make_confirmation!(CfmSend, ConfirmationTask::Socket, Confirmation::Send);
 
 /// Indicates that a listening socket has been connected to.
 #[derive(Debug)]
@@ -163,7 +168,7 @@ pub struct IndConnected {
 	pub peer: net::SocketAddr,
 }
 
-make_indication!(IndConnected, ::Indication::Socket, Indication::Connected);
+make_indication!(IndConnected, IndicationTask::Socket, Indication::Connected);
 
 /// Indicates that a socket has been dropped.
 #[derive(Debug)]
@@ -172,7 +177,7 @@ pub struct IndDropped {
 	pub handle: ConnHandle,
 }
 
-make_indication!(IndDropped, ::Indication::Socket, Indication::Dropped);
+make_indication!(IndDropped, IndicationTask::Socket, Indication::Dropped);
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
@@ -186,7 +191,7 @@ pub struct IndReceived {
 	pub data: Vec<u8>,
 }
 
-make_indication!(IndReceived, ::Indication::Socket, Indication::Received);
+make_indication!(IndReceived, IndicationTask::Socket, Indication::Received);
 
 /// Tell the task that more data can now be sent.
 #[derive(Debug)]
@@ -195,7 +200,7 @@ pub struct RspReceived {
 	pub handle: ConnHandle,
 }
 
-make_response!(RspReceived, ::Response::Socket, Response::Received);
+make_response!(RspReceived, ResponseTask::Socket, Response::Received);
 
 // ****************************************************************************
 //
@@ -248,10 +253,10 @@ pub trait User {
 }
 
 /// Uniquely identifies an listening socket
-pub type ListenHandle = ::Context;
+pub type ListenHandle = Context;
 
 /// Uniquely identifies an open socket
-pub type ConnHandle = ::Context;
+pub type ConnHandle = Context;
 
 /// All possible errors the Socket task might want to
 /// report.
@@ -285,22 +290,22 @@ pub enum ConnectionType {
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
 	handle: ListenHandle,
-	ind_to: ::MessageSender,
+	ind_to: MessageSender,
 	listener: mio::tcp::TcpListener,
 }
 
 /// Create for every pending write
 struct PendingWrite {
-	context: ::Context,
+	context: Context,
 	sent: usize,
 	data: Vec<u8>,
-	reply_to: ::MessageSender,
+	reply_to: MessageSender,
 }
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
 	// parent: ListenHandle,
-	ind_to: ::MessageSender,
+	ind_to: MessageSender,
 	handle: ConnHandle,
 	connection: mio::tcp::TcpStream,
 	/// There's a read the user hasn't process yet
@@ -316,9 +321,9 @@ struct TaskContext {
 	/// Set of all connected sockets
 	connections: HashMap<ConnHandle, ConnectedSocket>,
 	/// The next handle we'll use for a bound/open socket
-	next_handle: ::Context,
+	next_handle: Context,
 	/// The special channel our messages arrive on
-	mio_rx: mio_more::channel::Receiver<::Message>,
+	mio_rx: mio_more::channel::Receiver<Message>,
 	/// The object we poll on
 	poll: mio::Poll,
 }
@@ -337,7 +342,7 @@ struct TaskContext {
 //
 // ****************************************************************************
 
-const MAX_READ_LEN: usize = 128;
+const MAX_READ_LEN: usize = 2048;
 const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 // ****************************************************************************
@@ -348,7 +353,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> ::MessageSender {
+pub fn make_task() -> MessageSender {
 	::make_task("socket", main_loop)
 }
 
@@ -363,7 +368,7 @@ pub fn make_task() -> ::MessageSender {
 /// channels. So, we spin up a thread to bounce from one
 /// channel to the other. We don't need our own
 /// MessageSender as we don't send Requests that need replying to.
-fn main_loop(grease_rx: ::MessageReceiver, _: ::MessageSender) {
+fn main_loop(grease_rx: MessageReceiver, _: MessageSender) {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	let _ = thread::spawn(move || for msg in grease_rx.iter() {
 		let _ = mio_tx.send(msg);
@@ -380,24 +385,24 @@ impl TaskContext {
 		let num_events = self.poll.poll(&mut events, None).unwrap();
 		trace!("Woke up! Handling num_events={}", num_events);
 		for event in events.iter() {
-			self.ready(event)
+			self.process_event(event)
 		}
 	}
 
 	/// Called when mio has an update on a registered listener or connection
 	/// We have to check the Ready to find out whether our socket is
 	/// readable or writable
-	fn ready(&mut self, event: mio::Event) {
+	fn process_event(&mut self, event: mio::Event) {
 		let ready = event.readiness();
 		let token = event.token();
 		debug!("ready: {:?}, token: {:?}", ready, token);
-		let handle = token.0;
+		let handle = Context(token.0);
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
 				loop {
 					// Empty the whole message queue
 					if let Ok(msg) = self.mio_rx.try_recv() {
-						::MessageReceiver::render(&msg);
+						MessageReceiver::render(&msg);
 						self.handle_message(msg);
 					} else {
 						break;
@@ -405,10 +410,10 @@ impl TaskContext {
 				}
 			} else if self.listeners.contains_key(&handle) {
 				debug!("Readable listen socket {}?", handle);
-				self.accept(handle)
+				self.accept_new_connection(handle)
 			} else if self.connections.contains_key(&handle) {
 				debug!("Readable connected socket {}", handle);
-				self.read(handle, true)
+				self.read_from_socket(handle)
 			} else {
 				warn!("Readable on unknown token {}", handle);
 			}
@@ -430,13 +435,13 @@ impl TaskContext {
 	}
 
 	/// Called when our task has received a Message
-	fn handle_message(&mut self, msg: ::Message) {
+	fn handle_message(&mut self, msg: Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(reply_to, ::Request::Socket(x)) => {
+			Message::Request(reply_to, RequestTask::Socket(x)) => {
 				self.handle_socket_req(x, &reply_to)
 			}
-			::Message::Response(::Response::Socket(x)) => self.handle_socket_rsp(x),
+			Message::Response(ResponseTask::Socket(x)) => self.handle_socket_rsp(x),
 			// We don't expect any Indications or Confirmations from other providers
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in socket task: {:?}", msg),
@@ -444,11 +449,11 @@ impl TaskContext {
 	}
 
 	/// Init the context
-	pub fn new(mio_rx: mio_more::channel::Receiver<::Message>) -> TaskContext {
+	pub fn new(mio_rx: mio_more::channel::Receiver<Message>) -> TaskContext {
 		let t = TaskContext {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
-			next_handle: MESSAGE_TOKEN.0 + 1,
+			next_handle: Context(MESSAGE_TOKEN.0 + 1),
 			mio_rx: mio_rx,
 			poll: mio::Poll::new().unwrap(),
 		};
@@ -465,23 +470,22 @@ impl TaskContext {
 
 	/// Accept a new incoming connection and let the user know
 	/// with a IndConnected
-	fn accept(&mut self, ls_handle: ListenHandle) {
+	fn accept_new_connection(&mut self, ls_handle: ListenHandle) {
 		// We know this exists because we checked it before we got here
 		let ls = self.listeners.get(&ls_handle).unwrap();
 		if let Ok((stream, conn_addr)) = ls.listener.accept() {
 			let cs = ConnectedSocket {
 				// parent: ls.handle,
-				handle: self.next_handle,
+				handle: self.next_handle.take(),
 				ind_to: ls.ind_to.clone(),
 				connection: stream,
 				outstanding: false,
 				pending_writes: VecDeque::new(),
 			};
-			self.next_handle += 1;
 			self.poll
 				.register(
 					&cs.connection,
-					mio::Token(cs.handle),
+					mio::Token(cs.handle.0),
 					mio::Ready::readable() | mio::Ready::writable(),
 					mio::PollOpt::edge(),
 				)
@@ -552,7 +556,7 @@ impl TaskContext {
 	}
 
 	/// Data is available on a connected socket. Pass it up
-	fn read(&mut self, cs_handle: ConnHandle, was_ready: bool) {
+	fn read_from_socket(&mut self, cs_handle: ConnHandle) {
 		debug!("Reading connection {}", cs_handle);
 		let mut need_close = false;
 		{
@@ -567,8 +571,7 @@ impl TaskContext {
 						debug!("Read nothing on handle: {}", cs_handle);
 						// Reading zero bytes after a POLLIN means connection is closed
 						// See http://www.greenend.org.uk/rjk/tech/poll.html
-						// But don't close if this is speculative
-						need_close = was_ready;
+						need_close = true;
 					}
 					Ok(len) => {
 						debug!("Read {} octets on handle: {}", len, cs_handle);
@@ -580,10 +583,10 @@ impl TaskContext {
 						cs.outstanding = true;
 						cs.ind_to.send_nonrequest(ind);
 					}
-					Err(e) => {
-						debug!("Got \"{}\" reading on handle: {}", e, cs_handle);
-						// Don't close if this is speculative
-						need_close = was_ready;
+					Err(ref err) if err.kind() == ::std::io::ErrorKind::WouldBlock => {}
+					Err(err) => {
+						warn!("Read error on handle: {}, err: {}", cs.handle, err);
+						need_close = true;
 					}
 				}
 			} else {
@@ -605,7 +608,7 @@ impl TaskContext {
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self, req: Request, reply_to: &::MessageSender) {
+	pub fn handle_socket_req(&mut self, req: Request, reply_to: &MessageSender) {
 		match req {
 			Request::Bind(x) => self.handle_bind(*x, reply_to),
 			Request::Close(x) => self.handle_close(*x, reply_to),
@@ -614,7 +617,7 @@ impl TaskContext {
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: &MessageSender) {
 		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
 		match req_bind.conn_type {
 			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
@@ -622,11 +625,10 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: &::MessageSender) {
+	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: &MessageSender) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
-				let h = self.next_handle;
-				self.next_handle += 1;
+				let h = self.next_handle.take();
 				debug!("Allocated listen handle: {}", h);
 				let l = ListenSocket {
 					handle: h,
@@ -637,7 +639,7 @@ impl TaskContext {
 				};
 				match self.poll.register(
 					&l.listener,
-					mio::Token(h),
+					mio::Token(h.0),
 					mio::Ready::readable(),
 					mio::PollOpt::level(),
 				) {
@@ -667,7 +669,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self, req_close: ReqClose, reply_to: &::MessageSender) {
+	fn handle_close(&mut self, req_close: ReqClose, reply_to: &MessageSender) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -686,7 +688,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self, req_send: ReqSend, reply_to: &::MessageSender) {
+	fn handle_send(&mut self, req_send: ReqSend, reply_to: &MessageSender) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -768,14 +770,14 @@ impl TaskContext {
 		// have crossed over with a disconnect.
 		if let Some(cs) = self.connections.get_mut(&rsp_received.handle) {
 			cs.outstanding = false;
-			// Let's try and send them some - if if exhausts the
-			// buffer on the socket, the event loop will automatically
-			// set itself to interrupt when more data arrives
+			// Let's try and send them some more data - if it exhausts the
+			// buffer on the socket, the event loop will automatically set
+			// itself to interrupt when more data arrives
 			need_read = true;
 		}
 		if need_read {
 			// Try and read it - won't hurt if we can't.
-			self.read(rsp_received.handle, false)
+			self.read_from_socket(rsp_received.handle)
 		}
 	}
 }
@@ -799,6 +801,7 @@ mod test {
 	use std::net;
 	use rand;
 	use rand::Rng;
+	use env_logger;
 	use super::*;
 
 	#[test]
@@ -808,14 +811,14 @@ mod test {
 		let (reply_to, test_rx) = ::make_channel();
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8000".parse().unwrap(),
-			context: 1234,
+			context: Context(1234),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 1234);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(1234));
 				assert!(x.result.is_ok());
 			}
 			_ => panic!("Bad match"),
@@ -830,14 +833,14 @@ mod test {
 		// Shouldn't be able to bind :22 as normal user
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:22".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				assert!(x.result.is_err());
 			}
 			_ => panic!("Bad match"),
@@ -852,14 +855,14 @@ mod test {
 		// Shouldn't be able to bind :22 as normal user
 		let bind_req = ReqBind {
 			addr: "8.8.8.8:8000".parse().unwrap(),
-			context: 6666,
+			context: Context(6666),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let cfm = test_rx.recv();
 		match cfm {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 6666);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(6666));
 				assert!(x.result.is_err());
 			}
 			_ => panic!("Bad match"),
@@ -874,13 +877,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8001".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -891,7 +894,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -903,7 +906,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
@@ -918,13 +921,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8002".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8002 = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -932,13 +935,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8003".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle8003 = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -950,7 +953,7 @@ mod test {
 
 		// Check we get an IndConnected, twice
 		let conn_handle8003 = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8003);
 				assert_eq!(x.peer, stream8003.local_addr().unwrap());
 				x.conn_handle
@@ -958,7 +961,7 @@ mod test {
 			_ => panic!("Bad match"),
 		};
 		let conn_handle8002 = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle8002);
 				assert_eq!(x.peer, stream8002.local_addr().unwrap());
 				x.conn_handle
@@ -971,7 +974,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle8002);
 			}
 			_ => panic!("Bad match"),
@@ -982,7 +985,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle8003);
 			}
 			_ => panic!("Bad match"),
@@ -991,19 +994,27 @@ mod test {
 
 	#[test]
 	/// Uses 127.0.1.1:8004 to send random data
+	/// With the changes to remove hup and error, this test no longer passes
+	/// 100%. I think that's because there's a race between closing the socket
+	/// and sending the read response. We do a read, and get data. That was
+	/// actually the end of the data, but we didn't know it. When we do
+	/// a read after the response has arrived, we consider it speculative
+	/// and so don't declare the lack of data as an EOF marker.
 	fn send_data() {
+		let _ = env_logger::init();
+
 		let socket_thread = make_task();
 		let (reply_to, test_rx) = ::make_channel();
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8004".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -1014,7 +1025,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -1033,7 +1044,7 @@ mod test {
 		// Check we get data, in pieces of arbitrary length
 		while rx_data.len() < data.len() {
 			match test_rx.recv() {
-				::Message::Indication(::Indication::Socket(Indication::Received(ref x))) => {
+				Message::Indication(IndicationTask::Socket(Indication::Received(ref x))) => {
 					assert_eq!(x.handle, conn_handle);
 					rx_data.append(&mut x.data.clone());
 					socket_thread.send_nonrequest(RspReceived { handle: x.handle });
@@ -1046,13 +1057,16 @@ mod test {
 
 		stream.shutdown(net::Shutdown::Both).unwrap();
 
+		drop(stream);
+
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),
 		};
+
 	}
 
 	#[test]
@@ -1063,13 +1077,13 @@ mod test {
 
 		let bind_req = ReqBind {
 			addr: "127.0.1.1:8005".parse().unwrap(),
-			context: 5678,
+			context: Context(5678),
 			conn_type: ConnectionType::Stream,
 		};
 		socket_thread.send_request(bind_req, &reply_to);
 		let listen_handle = match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Bind(ref x))) => {
-				assert_eq!(x.context, 5678);
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Bind(ref x))) => {
+				assert_eq!(x.context, Context(5678));
 				x.result.unwrap()
 			}
 			_ => panic!("Bad match"),
@@ -1080,7 +1094,7 @@ mod test {
 
 		// Check we get an IndConnected
 		let conn_handle = match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Connected(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 				assert_eq!(x.listen_handle, listen_handle);
 				assert_eq!(x.peer, stream.local_addr().unwrap());
 				x.conn_handle
@@ -1098,7 +1112,7 @@ mod test {
 		socket_thread.send_request(
 			ReqSend {
 				handle: conn_handle,
-				context: 1234,
+				context: Context(1234),
 				data: data.clone(),
 			},
 			&reply_to,
@@ -1122,14 +1136,14 @@ mod test {
 
 		// Check we get cfm
 		match test_rx.recv() {
-			::Message::Confirmation(::Confirmation::Socket(Confirmation::Send(ref x))) => {
+			Message::Confirmation(ConfirmationTask::Socket(Confirmation::Send(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 				if let Ok(len) = x.result {
 					assert_eq!(len, data.len())
 				} else {
 					panic!("Didn't get OK in CfmSend");
 				}
-				assert_eq!(x.context, 1234);
+				assert_eq!(x.context, Context(1234));
 			}
 			_ => panic!("Bad match"),
 		};
@@ -1138,7 +1152,7 @@ mod test {
 
 		// Check we get an IndDropped
 		match test_rx.recv() {
-			::Message::Indication(::Indication::Socket(Indication::Dropped(ref x))) => {
+			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 				assert_eq!(x.handle, conn_handle);
 			}
 			_ => panic!("Bad match"),

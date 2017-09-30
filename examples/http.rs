@@ -19,6 +19,7 @@ use std::net;
 use env_logger::LogBuilder;
 use grease::socket;
 use grease::http;
+use grease::{Context, IndicationTask, Message, MessageReceiver};
 
 use log::{LogRecord, LogLevelFilter};
 
@@ -75,37 +76,37 @@ fn main() {
 	{
 		let bind_req = http::ReqBind {
 			addr: bind_addr,
-			context: 2,
+			context: Context::default(),
 		};
 		http_thread.send_request(bind_req, &tx);
 	}
 
-	let mut n: grease::Context = 0;
+	let mut n: Context = Context::default();
 
 
 	for msg in rx.iter() {
-		grease::MessageReceiver::render(&msg);
+		MessageReceiver::render(&msg);
 		match msg {
-			grease::Message::Indication(grease::Indication::Http(http::Indication::RxRequest(ref ind))) => {
-                let body_msg = format!("This is test {}\r\n", n);
-                info!("Got HTTP request {:?} {}", ind.method, ind.url);
-                let start = http::ReqResponseStart {
-                    status: http::HttpResponseStatus::OK,
-                    handle: ind.connection_handle,
-                    context: n,
-                    content_type: String::from("text/plain"),
-                    length: Some(body_msg.len()),
-                    headers: http::HeaderMap::new()
-                };
-                http_thread.send_request(start, &tx);
-                let body = http::ReqResponseBody {
-                    handle: ind.connection_handle,
-                    context: n,
-                    data: body_msg.into_bytes()
-                };
-                http_thread.send_request(body, &tx);
-                n = n + 1;
-            }
+			Message::Indication(IndicationTask::Http(http::Indication::RxRequest(ref ind))) => {
+				let body_msg = format!("This is test {}\r\n", n);
+				info!("Got HTTP request {:?} {}", ind.method, ind.url);
+				let ctx = n.take();
+				let start = http::ReqResponseStart {
+					status: http::HttpResponseStatus::OK,
+					handle: ind.connection_handle,
+					context: ctx,
+					content_type: String::from("text/plain"),
+					length: Some(body_msg.len()),
+					headers: http::HeaderMap::new(),
+				};
+				http_thread.send_request(start, &tx);
+				let body = http::ReqResponseBody {
+					handle: ind.connection_handle,
+					context: ctx,
+					data: body_msg.into_bytes(),
+				};
+				http_thread.send_request(body, &tx);
+			}
 			_ => {}
 		}
 	}

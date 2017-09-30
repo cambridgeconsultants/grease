@@ -164,7 +164,7 @@ impl TaskContext {
 	fn init(&mut self) {
 		let msg = http::ReqBind {
 			addr: "0.0.0.0:8000".parse().unwrap(),
-			context: 0,
+			context: ::Context::default(),
 		};
 		self.http.send_request(msg, &self.reply_to);
 	}
@@ -174,12 +174,12 @@ impl TaskContext {
 	fn handle(&mut self, msg: ::Message) {
 		match msg {
 			// We only handle our own requests and responses
-			::Message::Request(ref reply_to, ::Request::WebServ(ref x)) => {
+			::Message::Request(ref reply_to, ::RequestTask::WebServ(ref x)) => {
 				self.handle_webserv_req(x, reply_to)
 			}
 			// We use the http task so we expect to get confirmations and indications from it
-			::Message::Confirmation(::Confirmation::Http(ref x)) => self.handle_http_cfm(x),
-			::Message::Indication(::Indication::Http(ref x)) => self.handle_http_ind(x),
+			::Message::Confirmation(::ConfirmationTask::Http(ref x)) => self.handle_http_cfm(x),
+			::Message::Indication(::IndicationTask::Http(ref x)) => self.handle_http_ind(x),
 			// If we get here, someone else has made a mistake
 			_ => error!("Unexpected message in webserv task: {:?}", msg),
 		}

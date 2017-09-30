@@ -68,13 +68,13 @@
 ///
 /// ```ignore
 /// mod foo {
-///     make_request(ReqOpen, grease::Request::Foo, Request::Open)
+///     make_request!(ReqOpen, grease::RequestTask::Foo, Request::Open)
 /// }
 /// ```
 ///
-/// Where `ReqOpen` is the name of a struct, `grease::Request::Foo` is the
-/// member of `grease::Request` representing the `foo` module, and
-/// `Request::Open` is the member of the `Request` enum representing
+/// Where `ReqOpen` is the name of a struct, `grease::RequestTask::Foo` is the
+/// member of `grease::RequestTask` representing the `foo` module, and
+/// `Request::Open` is the member of the local `Request` enum representing
 /// a `ReqOpen` message.
 #[macro_export]
 macro_rules! make_request(
@@ -93,12 +93,14 @@ macro_rules! make_request(
 ///
 /// ```ignore
 /// mod foo {
-/// make_confirmation(CfmOpen, grease::Confirmation::Foo,
-/// Confirmation::Open)
+/// 	make_confirmation!(
+/// 			CfmOpen,
+/// 			grease::ConfirmationTask::Foo,
+/// 		Confirmation::Open);
 /// }
 /// ```
 ///
-/// Where `CfmOpen` is the name of a struct, `grease::Confirmation::Foo` is
+/// Where `CfmOpen` is the name of a struct, `grease::ConfirmationTask::Foo` is
 /// the member of `grease::Confirmation` representing the `foo` module, and
 /// `Confirmation::Open` is the member of the `Confirmation` enum
 /// representing a `CfmOpen` message.
@@ -118,12 +120,14 @@ macro_rules! make_confirmation(
 ///
 /// ```ignore
 /// mod foo {
-/// make_indication(IndConnected, grease::Indication::Foo,
-/// Indication::Connected)
+/// 	make_indication!(
+/// 			IndConnected,
+/// 			grease::IndicationTask::Foo,
+/// 		Indication::Connected);
 /// }
 /// ```
 ///
-/// Where `IndConnected` is the name of a struct, `grease::Indication::Foo` is
+/// Where `IndConnected` is the name of a struct, `grease::IndicationTask::Foo` is
 /// the member of the `grease::Indication` enum representing the `foo` module,
 /// and `Indication::Connected` is the member of the `Indication`
 /// enum representing a `IndConnected` message.
@@ -143,11 +147,14 @@ macro_rules! make_indication(
 ///
 /// ```ignore
 /// mod foo {
-///     make_response(RspConnected, grease::Response::Foo, Response::Connected)
+///     make_response(
+/// 			RspConnected,
+/// 			grease::ResponseTask::Foo,
+/// 			Response::Connected);
 /// }
 /// ```
 ///
-/// Where `RspConnected` is the name of a struct, `grease::Response::Foo` is
+/// Where `RspConnected` is the name of a struct, `grease::ResponseTask::Foo` is
 /// the member of `grease::Response` representing the `foo` module, and
 /// `Response::Connected` is the member of the `Response` enum representing a
 /// `RspConnected` message.
@@ -176,6 +183,9 @@ extern crate multi_map;
 extern crate rushttp;
 #[cfg(test)]
 extern crate rand;
+#[cfg(test)]
+extern crate env_logger;
+
 
 // ****************************************************************************
 //
@@ -215,7 +225,32 @@ pub struct MessageReceiver(mpsc::Receiver<Message>);
 /// A type used to passing context between layers. If each layer maintains
 /// a HashMap<Context, T>, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.
-pub type Context = usize;
+/// TODO: Replace this with a trait and a macro that generates a newtype
+/// which implements the trait.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Context(usize);
+
+impl Default for Context {
+	fn default() -> Context {
+		Context(0)
+	}
+}
+
+impl std::fmt::Display for Context {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "Context({})", self.0)
+	}
+}
+
+impl Context {
+	/// You can use take to grab a copy of the current value,
+	/// while incrementing it ready for the next use.
+	pub fn take(&mut self) -> Context {
+		let result = Context(self.0);
+		self.0 = self.0.wrapping_add(1);
+		result
+	}
+}
 
 /// When handling a request, the process may take some time. As the request
 /// must be destroyed as soon as it arrives (for logging purposes), the
@@ -231,17 +266,17 @@ pub struct ReplyContext {
 /// object that should be used to send the confirmation in reply.
 #[derive(Debug)]
 pub enum Message {
-	Request(MessageSender, Request),
-	Confirmation(Confirmation),
-	Indication(Indication),
-	Response(Response),
+	Request(MessageSender, RequestTask),
+	Confirmation(ConfirmationTask),
+	Indication(IndicationTask),
+	Response(ResponseTask),
 }
 
 /// The set of all requests in the system. This is an enumeration of all the
 /// services that can handle requests. The enum included within each service is
 /// probably defined in that service's module.
 #[derive(Debug)]
-pub enum Request {
+pub enum RequestTask {
 	Http(http::Request),
 	Socket(socket::Request),
 	WebServ(webserv::Request),
@@ -251,7 +286,7 @@ pub enum Request {
 /// `Request` but as `CfmXXX` instead of `ReqXXX`. These are handled by tasks
 /// that send requests - you send a request and you get a confirmation back.
 #[derive(Debug)]
-pub enum Confirmation {
+pub enum ConfirmationTask {
 	Http(http::Confirmation),
 	Socket(socket::Confirmation),
 	WebServ(webserv::Confirmation),
@@ -261,7 +296,7 @@ pub enum Confirmation {
 /// services that can send indications. The enum included within each
 /// service is probably defined in that service's module.
 #[derive(Debug)]
-pub enum Indication {
+pub enum IndicationTask {
 	Http(http::Indication),
 	Socket(socket::Indication),
 	WebServ(webserv::Indication),
@@ -271,7 +306,7 @@ pub enum Indication {
 /// services that need responses (which is actually quite rare). The enum
 /// included within each service is probably defined in that service's module.
 #[derive(Debug)]
-pub enum Response {
+pub enum ResponseTask {
 	Socket(socket::Response),
 }
 
@@ -322,6 +357,11 @@ pub trait RequestSendable {
 /// be iterated to obtain messages the task needs to process, and the
 /// `MessageSender` should be passed to any other tasks that need to message
 /// this one.
+///
+/// TODO:
+/// Create a `MessageHandler` trait and change this to
+/// rx.loop(&mut t);
+/// Where loop(self, &mut MessageHandler) -> !
 ///
 /// ```
 /// fn main_loop(rx: grease::MessageReceiver, _reply_to: grease::MessageSender) {
@@ -403,9 +443,10 @@ impl MessageReceiver {
 	/// stabilises, to the avoid the possibility of your test hanging
 	/// indefinitely.
 	pub fn recv(&self) -> Message {
-		match self.0.recv() {
+		match self.0.recv_timeout(std::time::Duration::from_millis(1000)) {
 			Ok(msg) => msg,
-			Err(_) => panic!("Channel disconnected"),
+			Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => panic!("Channel disconnected!"),
+			Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("Channel timeout..."),
 		}
 	}
 
