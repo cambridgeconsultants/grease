@@ -175,17 +175,16 @@ macro_rules! make_response(
 //
 // ****************************************************************************
 
+#[cfg(test)]
+extern crate env_logger;
 #[macro_use]
 extern crate log;
 extern crate mio;
 extern crate mio_more;
 extern crate multi_map;
-extern crate rushttp;
 #[cfg(test)]
 extern crate rand;
-#[cfg(test)]
-extern crate env_logger;
-
+extern crate rushttp;
 
 // ****************************************************************************
 //
