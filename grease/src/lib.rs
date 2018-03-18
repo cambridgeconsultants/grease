@@ -61,7 +61,7 @@
 //
 // ****************************************************************************
 
-// None
+pub mod prelude;
 
 // ****************************************************************************
 //
@@ -83,27 +83,26 @@
 /// types `Self::Request` and `Self::Response` respectively. They can be any
 /// type, but typically they are tagged enumerations where each tag is a
 /// different message.
-pub trait ServiceProvider {
-	type Request;
-	type Response;
-	type Confirm;
-	type Indication;
-	type ServiceUser;
-
-	fn place_request(&self, req: Self::Request, reply_to: Box<Self::ServiceUser>);
-	fn place_response(&self, rsp: Self::Response);
+pub trait ServiceProvider<REQ, CFM, IND, RSP> {
+	/// Call this to send a request to this provider.
+	fn send_request(&self, req: REQ, reply_to: UserHandle<CFM, IND>);
+	fn send_response(&self, rsp: RSP);
 }
 
 /// A Service User consumes the service provided by a Service Provider.
 ///
-/// This means it must handle Indications and Confirms.
-pub trait ServiceUser {
-	type Confirm;
-	type Indication;
-
-	fn receive_confirm(&self, cfm: Self::Confirm);
-	fn receive_indication(&self, ind: Self::Indication);
+/// This means it must handle Indications and Confirms. It must also be
+/// cloneable, so that we can keep copies for use later (with subsequent
+/// indications, for example).
+pub trait ServiceUser<CFM, IND> {
+	fn send_confirm(&self, cfm: CFM);
+	fn send_indication(&self, ind: IND);
+	fn clone(&self) -> UserHandle<CFM, IND>;
 }
+
+/// A boxed trait object, which the provider can use to send messages
+/// back to the user.
+pub type UserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 
 /// A type used to passing context between layers. If each layer maintains
 /// a HashMap<Context, T>, when a confirmation comes back from the layer

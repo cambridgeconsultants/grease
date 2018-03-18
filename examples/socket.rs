@@ -17,9 +17,7 @@ use std::net;
 use std::sync::mpsc;
 
 use grease::Context;
-
-use socket::ServiceProvider;
-use socket::ServiceUser;
+use grease::prelude::*;
 
 // ****************************************************************************
 //
@@ -60,7 +58,7 @@ struct Handle {
 	chan: mpsc::Sender<Incoming>,
 }
 
-impl socket::ServiceUser for Handle {
+impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 	fn send_confirm(&self, cfm: socket::Confirm) {
 		self.chan.send(Incoming::SocketConfirm(cfm)).unwrap();
 	}

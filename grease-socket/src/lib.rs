@@ -33,57 +33,6 @@ use grease::Context;
 //
 // ****************************************************************************
 
-/// A Boxed trait object representing anything that can receive confirms and
-/// indications from `socket` - i.e. any socket service user.
-pub type UserHandle = Box<ServiceUser + Send>;
-
-/// The set of all messages that this task can receive.
-pub enum Incoming {
-	/// One of our own requests that has come in
-	Request(Request, UserHandle),
-	/// One of our own responses that has come in
-	Response(Response),
-}
-
-/// Represents something a socket service user can hold on to
-/// to send us message.
-pub struct Handle {
-	chan: mio_more::channel::Sender<Incoming>,
-}
-
-/// We implement this trait as a provider of socket services.
-pub trait ServiceProvider {
-	/// Request the socket service do something
-	fn send_request(&self, req: Request, reply_to: UserHandle);
-	/// Respond to a socket service indication
-	fn send_response(&self, rsp: Response);
-}
-
-/// Users of the socket service need to implement this on a queue endpoint. We
-/// use this wrapped up as a `UserHandle`.
-pub trait ServiceUser {
-	/// The socket service calls this to send a confirmation back to the user.
-	fn send_confirm(&self, cfm: Confirm);
-	/// The socket service calls this to send an indication to the user.
-	fn send_indication(&self, ind: Indication);
-	/// The socket service calls this if it wishes to make a copy of the handle.
-	///
-	/// It appears we can't insist the object implement `Clone` without
-	/// breaking our use of boxed trait objects, so this allows the user to
-	/// provide appropriate clone functionality.
-	fn clone(&self) -> UserHandle;
-}
-
-impl ServiceProvider for Handle {
-	fn send_request(&self, req: Request, reply_to: UserHandle) {
-		self.chan.send(Incoming::Request(req, reply_to)).unwrap();
-	}
-
-	fn send_response(&self, rsp: Response) {
-		self.chan.send(Incoming::Response(rsp)).unwrap();
-	}
-}
-
 /// Requests that can be sent to the Socket task
 /// We box all the parameters, in case any of the structs are large as we don't
 /// want to bloat the master Message type.
@@ -237,48 +186,14 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
-/// Users of the socket task should implement this trait to
-/// make handling the incoming Confirm and Indication a little
-/// easier.
-pub trait Handler {
-	/// Handles a Socket Confirm, such as you will receive after sending
-	/// a Socket Request, by unpacking the enum and routing the struct
-	/// contained within to the appropriate handler.
-	fn handle_socket_cfm(&mut self, msg: &Confirm) {
-		match *msg {
-			Confirm::Bind(ref x) => self.handle_socket_cfm_bind(&x),
-			Confirm::Close(ref x) => self.handle_socket_cfm_close(&x),
-			Confirm::Send(ref x) => self.handle_socket_cfm_send(&x),
-		}
-	}
+/// A `socket` specific wrapper around `grease::UserHandle`. We use this to
+/// talk to our users.
+pub type UserHandle = grease::UserHandle<Confirm, Indication>;
 
-	/// Called when a Bind confirm is received.
-	fn handle_socket_cfm_bind(&mut self, msg: &CfmBind);
-
-	/// Called when a Close confirm is received.
-	fn handle_socket_cfm_close(&mut self, msg: &CfmClose);
-
-	/// Called when a Send confirm is received.
-	fn handle_socket_cfm_send(&mut self, msg: &CfmSend);
-
-	/// Handles a Socket Indication by unpacking the enum and routing the
-	/// struct contained withing to the appropriate handler.
-	fn handle_socket_ind(&mut self, msg: &Indication) {
-		match *msg {
-			Indication::Connected(ref x) => self.handle_socket_ind_connected(&x),
-			Indication::Dropped(ref x) => self.handle_socket_ind_dropped(&x),
-			Indication::Received(ref x) => self.handle_socket_ind_received(&x),
-		}
-	}
-
-	/// Handles a Connected indication.
-	fn handle_socket_ind_connected(&mut self, msg: &IndConnected);
-
-	/// Handles a connection Dropped indication.
-	fn handle_socket_ind_dropped(&mut self, msg: &IndDropped);
-
-	/// Handles a data Received indication.
-	fn handle_socket_ind_received(&mut self, msg: &IndReceived);
+/// Represents something a socket service user can hold on to to send us
+/// message.
+pub struct Handle {
+	chan: mio_more::channel::Sender<Incoming>,
 }
 
 /// Uniquely identifies an listening socket
@@ -315,6 +230,14 @@ pub enum ConnectionType {
 // Private Types
 //
 // ****************************************************************************
+
+/// The set of all messages that this task can receive.
+enum Incoming {
+	/// One of our own requests that has come in
+	Request(Request, UserHandle),
+	/// One of our own responses that has come in
+	Response(Response),
+}
 
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
@@ -787,6 +710,16 @@ impl TaskContext {
 			// Try and read it - won't hurt if we can't.
 			self.read_from_socket(rsp_received.handle)
 		}
+	}
+}
+
+impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
+	fn send_request(&self, req: Request, reply_to: UserHandle) {
+		self.chan.send(Incoming::Request(req, reply_to)).unwrap();
+	}
+
+	fn send_response(&self, rsp: Response) {
+		self.chan.send(Incoming::Response(rsp)).unwrap();
 	}
 }
 
