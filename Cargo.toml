@@ -1,6 +1,6 @@
 [package]
-name = "grease"
-version = "0.5.0"
+name = "grease-workspace"
+version = "0.1.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
 readme = "README.md"
 
@@ -10,7 +10,7 @@ time = "0.1"
 log = "0.4.1"
 
 [dependencies]
-grease-socket = { path = "socket" }
-grease-types = { path = "types" }
+grease-socket = { path = "./grease-socket" }
+grease = { path = "./grease" }
 
 [workspace]

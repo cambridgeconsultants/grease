@@ -8,7 +8,7 @@
 
 extern crate env_logger;
 extern crate grease_socket as socket;
-extern crate grease_types as types;
+extern crate grease;
 #[macro_use]
 extern crate log;
 extern crate time;
@@ -16,7 +16,7 @@ extern crate time;
 use std::net;
 use std::sync::mpsc;
 
-use types::Context;
+use grease::Context;
 
 use socket::ServiceProvider;
 use socket::ServiceUser;
