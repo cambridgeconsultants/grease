@@ -97,7 +97,6 @@ fn main() {
 	for msg in rx.iter() {
 		match msg {
 			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
-				std::thread::sleep(std::time::Duration::from_millis(500));
 				let recv_rsp =
 					socket::Response::Received(socket::RspReceived { handle: ind.handle });
 				socket_thread.send_response(recv_rsp);
