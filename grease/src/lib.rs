@@ -10,15 +10,6 @@
 //! replying. Typically, tasks will implement a Finite State Machine (FSM) to
 //! control their actions.
 //!
-//! Each task should be in its own module, and it should implement some sort
-//! of init function (usually called `make_task`). This will make the message
-//! queue (of the appropriate type), spin up a thread to process messages on
-//! that queue, and return a handle which may be used to submit messages to
-//! that queue. If the task needs to use other tasks, it should take that
-//! task's handle as an input - it is therefore important to create your tasks
-//! in a bottom up fashion, and not to create any circular dependencies
-//! between your tasks!
-//!
 //! ## Messages
 //!
 //! Messages in grease are defined by each individual layer in four different types:
@@ -42,7 +33,17 @@
 //!
 //! ## Implementing a task
 //!
-//! TODO
+//! Each task should be in its own module, and it should implement some sort
+//! of init function (usually called `make_task`). This will make the message
+//! queue (of the appropriate type), spin up a thread to process messages on
+//! that queue, and return a handle which may be used to submit messages to
+//! that queue. If the task needs to use other tasks, it should take that
+//! task's handle as an input - it is therefore important to create your tasks
+//! in a bottom up fashion, and not to create any circular dependencies
+//! between your tasks!
+//!
+//! Look in the top-level examples directory to see a TCP echo-server example
+//! and a very basic HTTP server example.
 
 // ****************************************************************************
 //
