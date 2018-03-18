@@ -1,0 +1,11 @@
+[package]
+name = "grease-http"
+version = "0.1.0"
+authors = ["Jonathan 'theJPster' Pallant <github@thejpster.org.uk>"]
+
+[dependencies]
+grease = { path = "../grease" }
+grease-socket = { path = "../grease-socket" }
+log = "0.4.1"
+rushttp = { git = "https://github.com/thejpster/rushttp" }
+multi-map = "*"

@@ -186,6 +186,8 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
+pub type ProviderHandle = grease::ProviderHandle<Request, Confirm, Indication, Response>;
+
 /// A `socket` specific wrapper around `grease::UserHandle`. We use this to
 /// talk to our users.
 pub type UserHandle = grease::UserHandle<Confirm, Indication>;

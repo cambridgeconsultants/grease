@@ -11,6 +11,7 @@ log = "0.4.1"
 
 [dependencies]
 grease-socket = { path = "./grease-socket" }
+grease-http = { path = "./grease-http" }
 grease = { path = "./grease" }
 
 [workspace]

@@ -104,6 +104,10 @@ pub trait ServiceUser<CFM, IND> {
 /// back to the user.
 pub type UserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 
+/// A boxed trait object, which a user can use to send messages
+/// in to a provider.
+pub type ProviderHandle<REQ, CFM, IND, RSP> = Box<ServiceProvider<REQ, CFM, IND, RSP> + Send>;
+
 /// A type used to passing context between layers. If each layer maintains
 /// a HashMap<Context, T>, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.
@@ -111,6 +115,37 @@ pub type UserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 /// which implements the trait.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Context(usize);
+
+/// When handling a request, the process may take some time. As the request
+/// must be destroyed as soon as it arrives (for logging purposes), the
+/// essential details are recorded so that a Confirmation can be sent at a
+/// later date.
+pub struct ReplyContext<CFM, IND> {
+	pub reply_to: UserHandle<CFM, IND>,
+	pub context: Context,
+}
+
+// ****************************************************************************
+//
+// Private Types
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
+// Public Data
+//
+// ****************************************************************************
+
+// None
+
+// ****************************************************************************
+//
+// Public Functions
+//
+// ****************************************************************************
 
 impl Context {
 	pub fn new(value: usize) -> Context {
@@ -143,30 +178,6 @@ impl Context {
 		result
 	}
 }
-
-// ****************************************************************************
-//
-// Private Types
-//
-// ****************************************************************************
-
-// None
-
-// ****************************************************************************
-//
-// Public Data
-//
-// ****************************************************************************
-
-// None
-
-// ****************************************************************************
-//
-// Public Functions
-//
-// ****************************************************************************
-
-// None
 
 // ****************************************************************************
 //
