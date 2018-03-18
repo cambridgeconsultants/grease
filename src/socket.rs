@@ -505,7 +505,7 @@ impl TaskContext {
 	/// Data can be sent a connected socket. Send what we have
 	fn pending_writes(&mut self, cs_handle: ConnHandle) {
 		// We know this exists because we checked it before we got here
-		let mut cs = self.connections.get_mut(&cs_handle).unwrap();
+		let cs = self.connections.get_mut(&cs_handle).unwrap();
 		loop {
 			if let Some(mut pw) = cs.pending_writes.pop_front() {
 				let to_send = pw.data.len() - pw.sent;
@@ -561,7 +561,7 @@ impl TaskContext {
 		let mut need_close = false;
 		{
 			// We know this exists because we checked it before we got here
-			let mut cs = self.connections.get_mut(&cs_handle).unwrap();
+			let cs = self.connections.get_mut(&cs_handle).unwrap();
 			// Only pass up one indication at a time
 			if !cs.outstanding {
 				// Cap the max amount we will read
