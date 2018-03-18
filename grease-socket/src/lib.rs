@@ -34,8 +34,6 @@ use grease::Context;
 // ****************************************************************************
 
 /// Requests that can be sent to the Socket task
-/// We box all the parameters, in case any of the structs are large as we don't
-/// want to bloat the master Message type.
 #[derive(Debug)]
 pub enum Request {
 	/// A Bind Request - Bind a listen socket

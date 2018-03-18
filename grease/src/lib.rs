@@ -11,8 +11,13 @@
 //! control their actions.
 //!
 //! Each task should be in its own module, and it should implement some sort
-//! of init function which calls `grease::make_task`, passing in a function
-//! which forms the task's main loop.
+//! of init function (usually called `make_task`). This will make the message
+//! queue (of the appropriate type), spin up a thread to process messages on
+//! that queue, and return a handle which may be used to submit messages to
+//! that queue. If the task needs to use other tasks, it should take that
+//! task's handle as an input - it is therefore important to create your tasks
+//! in a bottom up fashion, and not to create any circular dependencies
+//! between your tasks!
 //!
 //! ## Messages
 //!
@@ -115,7 +120,7 @@ pub type UserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 pub type ProviderHandle<REQ, CFM, IND, RSP> = Box<ServiceProvider<REQ, CFM, IND, RSP> + Send>;
 
 /// A type used to passing context between layers. If each layer maintains
-/// a HashMap<Context, T>, when a confirmation comes back from the layer
+/// a `HashMap<Context, T>`, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.
 /// TODO: Replace this with a trait and a macro that generates a newtype
 /// which implements the trait.
