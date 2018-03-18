@@ -187,6 +187,9 @@ pub struct IndClosed {
 //
 // ****************************************************************************
 
+/// Users can use this to send us messages.
+pub type ProviderHandle = grease::ProviderHandle<Request, Confirm, Indication, ()>;
+
 /// A `http` specific wrapper around `grease::UserHandle`. We use this to
 /// talk to our users.
 pub type UserHandle = grease::UserHandle<Confirm, Indication>;
@@ -311,7 +314,7 @@ type ReplyContext = grease::ReplyContext<Confirm, Indication>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: socket::ProviderHandle) -> Handle {
+pub fn make_task(socket: socket::ProviderHandle) -> ProviderHandle {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx.clone() };
 	std::thread::spawn(move || {
@@ -321,7 +324,7 @@ pub fn make_task(socket: socket::ProviderHandle) -> Handle {
 		}
 		panic!("This task should never die!");
 	});
-	Handle { chan: tx }
+	Box::new(Handle { chan: tx })
 }
 
 // ****************************************************************************
@@ -397,7 +400,7 @@ impl TaskContext {
 			conn_type: socket::ConnectionType::Stream,
 		};
 		self.socket
-			.send_request(socket::Request::Bind(req), self.reply_to.clone());
+			.send_request(socket::Request::Bind(req), &self.reply_to);
 		self.servers.insert(server.our_handle, None, server);
 	}
 
@@ -504,7 +507,7 @@ impl TaskContext {
 			};
 			self.pending.insert(req.context, pend);
 			self.socket
-				.send_request(socket::Request::Send(req), self.reply_to.clone());
+				.send_request(socket::Request::Send(req), &self.reply_to);
 		} else {
 			let cfm = CfmResponseStart {
 				context: req_start.context,
@@ -571,7 +574,7 @@ impl TaskContext {
 				};
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Send(req), self.reply_to.clone());
+					.send_request(socket::Request::Send(req), &self.reply_to);
 			} else {
 				// Close connection now!
 				let req = socket::ReqClose {
@@ -587,7 +590,7 @@ impl TaskContext {
 				};
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Close(req), self.reply_to.clone());
+					.send_request(socket::Request::Close(req), &self.reply_to);
 				let _ = self.connections.remove(&req_body.handle);
 			}
 		} else {
@@ -612,7 +615,7 @@ impl TaskContext {
 				data: output,
 			};
 			self.socket
-				.send_request(socket::Request::Send(req), self.reply_to.clone());
+				.send_request(socket::Request::Send(req), &self.reply_to);
 		} else {
 			warn!("Failed to render error");
 		}
@@ -622,7 +625,7 @@ impl TaskContext {
 			context: Context::default(),
 		};
 		self.socket
-			.send_request(socket::Request::Close(close_req), self.reply_to.clone());
+			.send_request(socket::Request::Close(close_req), &self.reply_to);
 	}
 
 	fn map_result<T>(result: Result<T, socket::SocketError>) -> Result<(), Error> {
@@ -736,7 +739,7 @@ impl TaskContext {
 				let _ = self.connections.remove(&pend.handle);
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Close(req), self.reply_to.clone());
+					.send_request(socket::Request::Close(req), &self.reply_to);
 			}
 		}
 	}
@@ -837,11 +840,17 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 }
 
 impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
-	fn send_request(&self, req: Request, reply_to: UserHandle) {
-		self.chan.send(Incoming::Request(req, reply_to)).unwrap();
+	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+		self.chan.send(Incoming::Request(req, reply_to.clone())).unwrap();
 	}
 
 	fn send_response(&self, _rsp: ()) {}
+
+	fn clone(&self) -> ProviderHandle {
+		Box::new(Handle {
+			chan: self.chan.clone(),
+		})
+	}
 }
 
 // #[cfg(test)]

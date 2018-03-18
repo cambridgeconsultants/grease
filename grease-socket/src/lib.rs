@@ -186,6 +186,7 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
+/// Users can use this to send us messages.
 pub type ProviderHandle = grease::ProviderHandle<Request, Confirm, Indication, Response>;
 
 /// A `socket` specific wrapper around `grease::UserHandle`. We use this to
@@ -307,7 +308,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> Handle {
+pub fn make_task() -> ProviderHandle {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
@@ -315,7 +316,7 @@ pub fn make_task() -> Handle {
 			task_context.poll();
 		}
 	});
-	Handle { chan: mio_tx }
+	Box::new(Handle { chan: mio_tx })
 }
 
 // ****************************************************************************
@@ -716,12 +717,18 @@ impl TaskContext {
 }
 
 impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
-	fn send_request(&self, req: Request, reply_to: UserHandle) {
-		self.chan.send(Incoming::Request(req, reply_to)).unwrap();
+	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+		self.chan.send(Incoming::Request(req, reply_to.clone())).unwrap();
 	}
 
 	fn send_response(&self, rsp: Response) {
 		self.chan.send(Incoming::Response(rsp)).unwrap();
+	}
+
+	fn clone(&self) -> ProviderHandle {
+		Box::new(Handle {
+			chan: self.chan.clone(),
+		})
 	}
 }
 

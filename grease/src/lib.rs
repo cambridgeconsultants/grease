@@ -85,8 +85,11 @@ pub mod prelude;
 /// different message.
 pub trait ServiceProvider<REQ, CFM, IND, RSP> {
 	/// Call this to send a request to this provider.
-	fn send_request(&self, req: REQ, reply_to: UserHandle<CFM, IND>);
+	fn send_request(&self, req: REQ, reply_to: &ServiceUser<CFM, IND>);
+	/// Call this to send a response to this provider.
 	fn send_response(&self, rsp: RSP);
+	/// Call this to clone this object so another task can use it.
+	fn clone(&self) -> ProviderHandle<REQ, CFM, IND, RSP>;
 }
 
 /// A Service User consumes the service provided by a Service Provider.
@@ -95,8 +98,11 @@ pub trait ServiceProvider<REQ, CFM, IND, RSP> {
 /// cloneable, so that we can keep copies for use later (with subsequent
 /// indications, for example).
 pub trait ServiceUser<CFM, IND> {
+	/// Call this to send a confirmation back to the service user.
 	fn send_confirm(&self, cfm: CFM);
+	/// Call this to send an indication to the service user.
 	fn send_indication(&self, ind: IND);
+	/// Call this so we can store this user reference in two places.
 	fn clone(&self) -> UserHandle<CFM, IND>;
 }
 

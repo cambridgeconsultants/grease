@@ -1,4 +1,4 @@
-//! # socket - a grease example using sockets
+//! # http - a grease example using http and sockets
 
 // ****************************************************************************
 //
@@ -8,13 +8,14 @@
 
 extern crate env_logger;
 extern crate grease;
+extern crate grease_http as http;
 extern crate grease_socket as socket;
 #[macro_use]
 extern crate log;
 extern crate time;
 
-use std::net;
 use std::sync::mpsc;
+use std::net;
 
 use grease::Context;
 
@@ -32,9 +33,12 @@ use grease::Context;
 //
 // ****************************************************************************
 
+#[derive(Debug)]
 enum Incoming {
 	SocketConfirm(socket::Confirm),
 	SocketIndication(socket::Indication),
+	HttpConfirm(http::Confirm),
+	HttpIndication(http::Indication),
 }
 
 struct Handle {
@@ -57,6 +61,22 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 	}
 }
 
+impl grease::ServiceUser<http::Confirm, http::Indication> for Handle {
+	fn send_confirm(&self, cfm: http::Confirm) {
+		self.chan.send(Incoming::HttpConfirm(cfm)).unwrap();
+	}
+
+	fn send_indication(&self, ind: http::Indication) {
+		self.chan.send(Incoming::HttpIndication(ind)).unwrap();
+	}
+
+	fn clone(&self) -> http::UserHandle {
+		Box::new(Handle {
+			chan: self.chan.clone(),
+		})
+	}
+}
+
 // ****************************************************************************
 //
 // Public Data
@@ -71,52 +91,52 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 //
 // ****************************************************************************
 
-
 /// Start of our example program
 fn main() {
 	env_logger::init();
 	let bind_addr: net::SocketAddr = "0.0.0.0:8000".parse().unwrap();
 
-	info!("Hello, this is the grease socket example.");
-	info!("Running echo server on {}", bind_addr);
+	info!("Hello, this is the grease HTTP example.");
+	info!("Running HTTP server on {}", bind_addr);
 
 	let socket_thread = socket::make_task();
+	let http_thread = http::make_task(socket_thread);
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
+
 	{
-		let bind_req = socket::Request::Bind(socket::ReqBind {
-			context: Context::default(),
+		let bind_req = http::ReqBind {
 			addr: bind_addr,
-			conn_type: socket::ConnectionType::Stream,
-		});
-		socket_thread.send_request(bind_req, &handle);
+			context: Context::default(),
+		};
+		http_thread.send_request(http::Request::Bind(bind_req), &handle);
 	}
 
 	let mut n: Context = Context::default();
 
+
 	for msg in rx.iter() {
+		debug!("Rx: {:?}", msg);
 		match msg {
-			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
-				std::thread::sleep(std::time::Duration::from_millis(500));
-				let recv_rsp =
-					socket::Response::Received(socket::RspReceived { handle: ind.handle });
-				socket_thread.send_response(recv_rsp);
-				info!("Echoing {} bytes of input", ind.data.len());
-				let send_req = socket::Request::Send(socket::ReqSend {
-					handle: ind.handle,
-					data: ind.data,
-					context: n.take(),
-				});
-				socket_thread.send_request(send_req, &handle);
-			}
-			Incoming::SocketIndication(socket::Indication::Connected(ind)) => {
-				info!(
-					"Got connection from {}, handle = {}",
-					ind.peer, ind.conn_handle
-				);
-			}
-			Incoming::SocketIndication(socket::Indication::Dropped(ind)) => {
-				info!("Connection dropped, handle = {}", ind.handle);
+			Incoming::HttpIndication(http::Indication::RxRequest(ind)) => {
+				let body_msg = format!("This is test {}\r\nYou used URL '{}'\r\n", n, ind.url);
+				info!("Got HTTP request {:?} {}", ind.method, ind.url);
+				let ctx = n.take();
+				let start = http::ReqResponseStart {
+					status: http::HttpResponseStatus::OK,
+					handle: ind.connection_handle,
+					context: ctx,
+					content_type: String::from("text/plain"),
+					length: Some(body_msg.len()),
+					headers: http::HeaderMap::new(),
+				};
+				http_thread.send_request(http::Request::ResponseStart(start), &handle);
+				let body = http::ReqResponseBody {
+					handle: ind.connection_handle,
+					context: ctx,
+					data: body_msg.into_bytes(),
+				};
+				http_thread.send_request(http::Request::ResponseBody(body), &handle);
 			}
 			_ => {}
 		}
