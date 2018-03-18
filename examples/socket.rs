@@ -18,9 +18,13 @@ use std::net;
 
 use env_logger::LogBuilder;
 use grease::socket;
-use grease::{Context, IndicationTask, Message, MessageReceiver};
+use grease::Context;
+use std::sync::mpsc;
 
-use log::{LogRecord, LogLevelFilter};
+use socket::ServiceProvider;
+use socket::ServiceUser;
+
+use log::{LogLevelFilter, LogRecord};
 
 // ****************************************************************************
 //
@@ -52,6 +56,31 @@ use log::{LogRecord, LogLevelFilter};
 //
 // ****************************************************************************
 
+enum Incoming {
+	SocketConfirm(socket::Confirm),
+	SocketIndication(socket::Indication),
+}
+
+struct Handle {
+	chan: mpsc::Sender<Incoming>,
+}
+
+impl socket::ServiceUser for Handle {
+	fn send_confirm(&self, cfm: socket::Confirm) {
+		self.chan.send(Incoming::SocketConfirm(cfm)).unwrap();
+	}
+
+	fn send_indication(&self, ind: socket::Indication) {
+		self.chan.send(Incoming::SocketIndication(ind)).unwrap();
+	}
+
+	fn clone(&self) -> socket::UserHandle {
+		Box::new(Handle {
+			chan: self.chan.clone(),
+		})
+	}
+}
+
 /// Start of our example program
 fn main() {
 	// Initialise the logging with a custom logger
@@ -69,41 +98,41 @@ fn main() {
 	info!("Running echo server on {}", bind_addr);
 
 	let socket_thread = socket::make_task();
-	let (tx, rx) = grease::make_channel();
+	let (tx, rx) = mpsc::channel();
+	let handle = Handle { chan: tx };
 	{
-		let bind_req = socket::ReqBind {
+		let bind_req = socket::Request::Bind(socket::ReqBind {
 			context: Context::default(),
 			addr: bind_addr,
 			conn_type: socket::ConnectionType::Stream,
-		};
-		socket_thread.send_request(bind_req, &tx);
+		});
+		socket_thread.send_request(bind_req, handle.clone());
 	}
 
 	let mut n: Context = Context::default();
 
 	for msg in rx.iter() {
-		MessageReceiver::render(&msg);
 		match msg {
-			Message::Indication(IndicationTask::Socket(socket::Indication::Received(ind))) => {
+			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
 				std::thread::sleep(std::time::Duration::from_millis(500));
-				let recv_rsp = socket::RspReceived { handle: ind.handle };
-				socket_thread.send_nonrequest(recv_rsp);
+				let recv_rsp =
+					socket::Response::Received(socket::RspReceived { handle: ind.handle });
+				socket_thread.send_response(recv_rsp);
 				info!("Echoing {} bytes of input", ind.data.len());
-				let send_req = socket::ReqSend {
+				let send_req = socket::Request::Send(socket::ReqSend {
 					handle: ind.handle,
 					data: ind.data,
 					context: n.take(),
-				};
-				socket_thread.send_request(send_req, &tx);
+				});
+				socket_thread.send_request(send_req, handle.clone());
 			}
-			Message::Indication(IndicationTask::Socket(socket::Indication::Connected(ind))) => {
+			Incoming::SocketIndication(socket::Indication::Connected(ind)) => {
 				info!(
 					"Got connection from {}, handle = {}",
-					ind.peer,
-					ind.conn_handle
+					ind.peer, ind.conn_handle
 				);
 			}
-			Message::Indication(IndicationTask::Socket(socket::Indication::Dropped(ind))) => {
+			Incoming::SocketIndication(socket::Indication::Dropped(ind)) => {
 				info!("Connection dropped, handle = {}", ind.handle);
 			}
 			_ => {}
