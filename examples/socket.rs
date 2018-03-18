@@ -7,24 +7,19 @@
 // ****************************************************************************
 
 extern crate env_logger;
-extern crate grease;
+extern crate grease_socket as socket;
+extern crate grease_types as types;
 #[macro_use]
 extern crate log;
 extern crate time;
 
-use std::env;
-use std::thread;
 use std::net;
-
-use env_logger::LogBuilder;
-use grease::socket;
-use grease::Context;
 use std::sync::mpsc;
+
+use types::Context;
 
 use socket::ServiceProvider;
 use socket::ServiceUser;
-
-use log::{LogLevelFilter, LogRecord};
 
 // ****************************************************************************
 //
@@ -83,15 +78,7 @@ impl socket::ServiceUser for Handle {
 
 /// Start of our example program
 fn main() {
-	// Initialise the logging with a custom logger
-	let mut builder = LogBuilder::new();
-	builder.format(format).filter(None, LogLevelFilter::Debug);
-	if env::var("RUST_LOG").is_ok() {
-		// Allow environment variable override
-		builder.parse(&env::var("RUST_LOG").unwrap());
-	}
-	builder.init().unwrap();
-
+	env_logger::init();
 	let bind_addr: net::SocketAddr = "0.0.0.0:8000".parse().unwrap();
 
 	info!("Hello, this is the grease socket example.");
@@ -146,20 +133,7 @@ fn main() {
 //
 // ****************************************************************************
 
-/// Our custom log function
-fn format(record: &LogRecord) -> String {
-	let ts = time::now();
-	let thread_id = thread::current();
-	let thread_name = thread_id.name().unwrap_or("<??>");
-	format!(
-		"{},{:03} - {:06} - {:10} - {}",
-		time::strftime("%Y-%m-%d %H:%M:%S", &ts).unwrap(),
-		ts.tm_nsec / 1_000_000,
-		record.level(),
-		thread_name,
-		record.args()
-	)
-}
+// None
 
 // ****************************************************************************
 //

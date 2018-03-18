@@ -5,7 +5,11 @@
 //! receives asynchronous indications when data arrives on the socket and/or
 //! when the socket closes.
 
-#![deny(missing_docs)]
+extern crate grease_types;
+#[macro_use]
+extern crate log;
+extern crate mio;
+extern crate mio_more;
 
 // ****************************************************************************
 //
@@ -21,10 +25,7 @@ use std::io;
 use std::net;
 use std::thread;
 
-use mio;
-use mio_more;
-
-use super::Context;
+use grease_types::Context;
 
 // ****************************************************************************
 //
@@ -415,7 +416,7 @@ impl TaskContext {
 		let ready = event.readiness();
 		let token = event.token();
 		debug!("ready: {:?}, token: {:?}", ready, token);
-		let handle = Context(token.0);
+		let handle = Context::new(token.0);
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
 				loop {
@@ -472,7 +473,7 @@ impl TaskContext {
 		let t = TaskContext {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
-			next_handle: Context(MESSAGE_TOKEN.0 + 1),
+			next_handle: Context::new(MESSAGE_TOKEN.0 + 1),
 			mio_rx: mio_rx,
 			poll: mio::Poll::new().unwrap(),
 		};
@@ -504,7 +505,7 @@ impl TaskContext {
 			self.poll
 				.register(
 					&cs.connection,
-					mio::Token(cs.handle.0),
+					mio::Token(cs.handle.as_usize()),
 					mio::Ready::readable() | mio::Ready::writable(),
 					mio::PollOpt::edge(),
 				)
@@ -654,7 +655,7 @@ impl TaskContext {
 				};
 				match self.poll.register(
 					&l.listener,
-					mio::Token(h.0),
+					mio::Token(h.as_usize()),
 					mio::Ready::readable(),
 					mio::PollOpt::level(),
 				) {

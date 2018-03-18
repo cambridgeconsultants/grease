@@ -1,17 +1,16 @@
 [package]
 name = "grease"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["theJPster <github@thejpster.org.uk>"]
 readme = "README.md"
 
 [dev-dependencies]
-env_logger = "0.3"
+env_logger = "0.5.6"
 time = "0.1"
-rand = "0.3"
+log = "0.4.1"
 
 [dependencies]
-log = "0.3"
-mio = "0.6"
-rushttp = { git = "https://github.com/thejpster/rushttp.git" }
-multi-map = "^1.0"
-mio-more = "0.1.0"
+grease-socket = { path = "socket" }
+grease-types = { path = "types" }
+
+[workspace]

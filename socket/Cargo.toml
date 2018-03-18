@@ -1,0 +1,10 @@
+[package]
+name = "grease-socket"
+version = "0.1.0"
+authors = ["Jonathan 'theJPster' Pallant <github@thejpster.org.uk>"]
+
+[dependencies]
+mio = "0.6"
+mio-more = "0.1.0"
+grease-types = { path = "../types" }
+log = "0.4.1"
