@@ -35,30 +35,12 @@ use grease::Context;
 
 #[derive(Debug)]
 enum Incoming {
-	SocketConfirm(socket::Confirm),
-	SocketIndication(socket::Indication),
 	HttpConfirm(http::Confirm),
 	HttpIndication(http::Indication),
 }
 
 struct Handle {
 	chan: mpsc::Sender<Incoming>,
-}
-
-impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
-	fn send_confirm(&self, cfm: socket::Confirm) {
-		self.chan.send(Incoming::SocketConfirm(cfm)).unwrap();
-	}
-
-	fn send_indication(&self, ind: socket::Indication) {
-		self.chan.send(Incoming::SocketIndication(ind)).unwrap();
-	}
-
-	fn clone(&self) -> socket::UserHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
-	}
 }
 
 impl grease::ServiceUser<http::Confirm, http::Indication> for Handle {
