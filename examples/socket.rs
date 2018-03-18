@@ -71,7 +71,6 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 //
 // ****************************************************************************
 
-
 /// Start of our example program
 fn main() {
 	env_logger::init();

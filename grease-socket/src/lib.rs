@@ -384,11 +384,11 @@ impl TaskContext {
 		match msg {
 			// We only handle our own requests and responses
 			Incoming::Request(msg, reply_to) => {
-				debug!("Request: {:?}", msg);
+				debug!("Rx: {:?}", msg);
 				self.handle_socket_req(msg, reply_to)
 			}
 			Incoming::Response(msg) => {
-				debug!("Response: {:?}", msg);
+				debug!("Rx: {:?}", msg);
 				self.handle_socket_rsp(msg)
 			}
 		}
@@ -718,7 +718,9 @@ impl TaskContext {
 
 impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
 	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-		self.chan.send(Incoming::Request(req, reply_to.clone())).unwrap();
+		self.chan
+			.send(Incoming::Request(req, reply_to.clone()))
+			.unwrap();
 	}
 
 	fn send_response(&self, rsp: Response) {

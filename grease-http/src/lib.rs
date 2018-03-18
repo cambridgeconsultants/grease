@@ -56,7 +56,6 @@ use std::sync::mpsc;
 pub use rushttp::response::HttpResponseStatus;
 pub use rushttp::{HeaderMap, Method, Uri};
 
-use grease::prelude::*;
 use grease::Context;
 
 // ****************************************************************************
@@ -353,9 +352,18 @@ impl TaskContext {
 	fn handle(&mut self, msg: Incoming) {
 		match msg {
 			// We only handle our own requests and responses
-			Incoming::Request(x, reply_to) => self.handle_http_req(x, reply_to),
-			Incoming::SocketCfm(x) => self.handle_socket_cfm(x),
-			Incoming::SocketInd(x) => self.handle_socket_ind(x),
+			Incoming::Request(x, reply_to) => {
+				debug!("Rx: {:?}", x);
+				self.handle_http_req(x, reply_to);
+			}
+			Incoming::SocketCfm(x) => {
+				debug!("Rx: {:?}", x);
+				self.handle_socket_cfm(x);
+			}
+			Incoming::SocketInd(x) => {
+				debug!("Rx: {:?}", x);
+				self.handle_socket_ind(x);
+			}
 		}
 	}
 
@@ -841,7 +849,9 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 
 impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
 	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-		self.chan.send(Incoming::Request(req, reply_to.clone())).unwrap();
+		self.chan
+			.send(Incoming::Request(req, reply_to.clone()))
+			.unwrap();
 	}
 
 	fn send_response(&self, _rsp: ()) {}

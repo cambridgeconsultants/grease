@@ -114,7 +114,6 @@ fn main() {
 
 	let mut n: Context = Context::default();
 
-
 	for msg in rx.iter() {
 		debug!("Rx: {:?}", msg);
 		match msg {
