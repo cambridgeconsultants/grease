@@ -7,8 +7,8 @@
 // ****************************************************************************
 
 extern crate env_logger;
-extern crate grease_socket as socket;
 extern crate grease;
+extern crate grease_socket as socket;
 #[macro_use]
 extern crate log;
 extern crate time;
