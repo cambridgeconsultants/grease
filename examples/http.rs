@@ -21,7 +21,7 @@ use grease::socket;
 use grease::http;
 use grease::{Context, IndicationTask, Message, MessageReceiver};
 
-use log::{LogRecord, LogLevelFilter};
+use log::{LogLevelFilter, LogRecord};
 
 // ****************************************************************************
 //
@@ -82,7 +82,6 @@ fn main() {
 	}
 
 	let mut n: Context = Context::default();
-
 
 	for msg in rx.iter() {
 		MessageReceiver::render(&msg);

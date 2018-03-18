@@ -48,10 +48,10 @@ use rushttp;
 use socket;
 use socket::User as SocketUser;
 use prelude::*;
-use super::{Context, ConfirmationTask, IndicationTask, MessageReceiver, MessageSender, RequestTask};
+use super::{ConfirmationTask, Context, IndicationTask, MessageReceiver, MessageSender, RequestTask};
 
 pub use rushttp::response::HttpResponseStatus;
-pub use rushttp::{Uri, Method, HeaderMap};
+pub use rushttp::{HeaderMap, Method, Uri};
 
 // ****************************************************************************
 //
@@ -450,9 +450,8 @@ impl TaskContext {
 		&mut self,
 		handle: &socket::ListenHandle,
 	) -> Option<ServerHandle> {
-		self.get_server_by_socket_handle(handle).and_then(|x| {
-			Some(x.our_handle)
-		})
+		self.get_server_by_socket_handle(handle)
+			.and_then(|x| Some(x.our_handle))
 	}
 
 	/// Get a reference to the appropriate Connection object, and its
@@ -504,7 +503,6 @@ impl TaskContext {
 	/// @todo We should we check they call this once and only once.
 	fn handle_responsestart(&mut self, req_start: &ReqResponseStart, reply_to: &MessageSender) {
 		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
-
 			let skt = {
 				let conn = self.get_conn_by_http_handle(&req_start.handle).unwrap();
 				conn.body_length = req_start.length;
@@ -546,7 +544,6 @@ impl TaskContext {
 
 	fn handle_responsebody(&mut self, req_body: &ReqResponseBody, reply_to: &MessageSender) {
 		if self.get_conn_by_http_handle(&req_body.handle).is_some() {
-
 			let mut close_after = false;
 			let skt = {
 				let conn = self.get_conn_by_http_handle(&req_body.handle).unwrap();
@@ -628,12 +625,7 @@ impl TaskContext {
 		}
 	}
 
-	fn send_response(
-		&self,
-		handle: &socket::ConnHandle,
-		code: HttpResponseStatus,
-		message: &str,
-	) {
+	fn send_response(&self, handle: &socket::ConnHandle, code: HttpResponseStatus, message: &str) {
 		// An error occured which we must tell them about
 		let mut r = rushttp::response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
 		r.add_header("Content-Type", "text/plain");
@@ -722,7 +714,9 @@ impl SocketUser for TaskContext {
 					// Nothing to send - internally generated
 				}
 			}
-			let ind = IndClosed { handle: pend.handle };
+			let ind = IndClosed {
+				handle: pend.handle,
+			};
 			pend.reply_to.send_nonrequest(ind);
 		}
 	}
@@ -787,14 +781,10 @@ impl SocketUser for TaskContext {
 			};
 			debug!(
 				"New connection {:?}, socket={:?}",
-				conn.our_handle,
-				conn.socket_handle
+				conn.our_handle, conn.socket_handle
 			);
-			self.connections.insert(
-				conn.our_handle,
-				conn.socket_handle,
-				conn,
-			);
+			self.connections
+				.insert(conn.our_handle, conn.socket_handle, conn);
 		} else {
 			warn!("Connection on non-existant socket handle");
 		}
@@ -848,9 +838,8 @@ impl SocketUser for TaskContext {
 			}
 		}
 
-		self.socket.send_nonrequest(
-			socket::RspReceived { handle: ind.handle },
-		);
+		self.socket
+			.send_nonrequest(socket::RspReceived { handle: ind.handle });
 	}
 }
 
@@ -978,16 +967,15 @@ mod test {
 			length: None,
 			headers: HeaderMap::new(),
 		};
-		msg.headers.insert(
-			"x-magic",
-			"frobbins".parse().unwrap(),
-		);
+		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
 		http_thread.send_request(msg, &reply_to);
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Send(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
 				               text/plain\r\nx-magic: frobbins\r\n\r\n"
@@ -1025,8 +1013,10 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Send(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
@@ -1060,8 +1050,10 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Close(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Close(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
@@ -1094,7 +1086,6 @@ mod test {
 		};
 
 		// ******************** All done ********************
-
 	}
 
 	#[test]
@@ -1160,16 +1151,15 @@ mod test {
 			length: Some(24),
 			headers: HeaderMap::new(),
 		};
-		msg.headers.insert(
-			"x-magic",
-			"frobbins".parse().unwrap(),
-		);
+		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
 		http_thread.send_request(msg, &reply_to);
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Send(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
 				               24\r\nContent-Type: text/plain\r\nx-magic: frobbins\r\n\r\n"
@@ -1208,8 +1198,10 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Send(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Send(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				assert_eq!(x.data, test_body);
 				let send_cfm = socket::CfmSend {
@@ -1236,8 +1228,10 @@ mod test {
 
 		let msg = test_rx.recv();
 		match msg {
-			::Message::Request(ref msg_reply_to,
-			                   RequestTask::Socket(socket::Request::Close(ref x))) => {
+			::Message::Request(
+				ref msg_reply_to,
+				RequestTask::Socket(socket::Request::Close(ref x)),
+			) => {
 				assert_eq!(x.handle, Context(5));
 				let send_cfm = socket::CfmClose {
 					handle: x.handle,
@@ -1260,7 +1254,6 @@ mod test {
 		};
 
 		// ******************** All done ********************
-
 	}
 
 }
