@@ -1,10 +1,10 @@
-# Grease: A multi-threaded message-passing approach to writing stacks in Rust
+# Grease: A multi-threaded message-passing approach to writing protocol stacks in Rust
 
 ## Introduction
 
-Grease is designed to facilitate a message-passing based approach to stack development. Message passing between tasks, as opposed to function-call based stacks, has a number of advantages:
+Grease is designed to facilitate a message-passing based approach to protocol stack development. Message passing between tasks, as opposed to function-call based protocol stacks, has a number of advantages:
 
-* Each task gets its own stack, which makes it easier to determine the maximum stack usage and hence the appropriate stack size.
+* Each task gets its own call-stack, which makes it easier to determine the maximum stack usage and hence the appropriate stack size.
 * Message passing encourages an interface-first approach.
 * Logging the messages as they are passed gives a low-cost but very useful mechanism for diagnosing bugs.
 * There is no shared state between tasks, so Mutexes and other such constructs are not required. This simplifies the programming model considerably.
@@ -69,7 +69,7 @@ Now, Grease is not necessaily suitable for implementing the entire stack from to
 
 ## The Four Messages
 
-If we have some upper layer `N` and some lower layer `N-m` (e.g. `N-1`), we say that `Layer N-m` is the *provider* of a *service* and `Layer N` is the *user* of that *service*. In Grease, *Service users* and *service providers* exist in different threads and speak to each other using *messages*, passed via *channels*. That is, as opposed to a *service user* making a function call into some *service provider* module, as might occur in other sorts of stack implementation (such as the Berkeley socket API, or indeed most of the APIs your Operating System provides). There are four sorts of *message*:
+If we have some upper layer `N` and some lower layer `N-m` (e.g. `N-1`), we say that `Layer N-m` is the *provider* of a *service* and `Layer N` is the *user* of that *service*. In Grease, *Service users* and *service providers* exist in different threads and speak to each other using *messages* which are passed via boxed trait objects which usually wrap *channels*. That is, as opposed to a *service user* making a function call into some *service provider* module, as might occur in other sorts of stack implementation (such as the Berkeley socket API, or indeed most of the APIs your Operating System provides). There are four sorts of *message*:
 
 1. Request (or REQ). A *service user* (the higher layer) sends a *request* to a *service provider* (the lower layer) to request that it 'do' something. It might be that the lower layer needs to perform an action, or to answer a question. Examples might include, open a new connection, or transmit some data on an existing connection.
 
@@ -98,24 +98,24 @@ Note that in all four cases, the messages are defined by the *service provider* 
 Often it is useful to describe these interactions using a [Message Sequence Chart](https://en.wikipedia.org/wiki/Message_sequence_chart). Each task is a vertical line, where moving left to right is usually moving down the stack, and moving down the Y axis represents time moving forwards. Here we see a *request* into Layer N-1 triggers a *request* into Layer N-2, and so on.
 
 ```
-    Layer N         Layer N-1          Layer N-2
-       |                 |                 |
-       |      REQ        |                 |
-       |================>|       REQ       |
-       |                 |================>|
-       |                 |       CFM       |
-       |      CFM        |<= = = = = = = = |
-       |<= = = = = = = = |                 |
-       |                 |       IND       |
-       |      IND        |<----------------|
-       |<----------------|                 |
-       |                 |                 |
-       |      RSP        |                 |
-       |- - - - - - - - >|       RSP       |
-       |                 |- - - - - - - - >|
+Layer N         Layer N-1          Layer N-2
+   |                 |                 |
+   |      REQ        |                 |
+   |================>|       REQ       |
+   |                 |================>|
+   |                 |       CFM       |
+   |      CFM        |<= = = = = = = = |
+   |<= = = = = = = = |                 |
+   |                 |       IND       |
+   |      IND        |<----------------|
+   |<----------------|                 |
+   |                 |                 |
+   |      RSP        |                 |
+   |- - - - - - - - >|       RSP       |
+   |                 |- - - - - - - - >|
 ```
 
-Also note the assumption is that if a *service user* sends a *service provider* a *request*, the *service user* _will_ get a *confirmation*. To significantly simplify the code there should be no error handling for the case that one doesn't arrive. *Providers* must ensure that the *confirmation* is either fast (sent immediately in the routine that processes the *request*), or gated on a *confirmation* from a subsequent *service provider* below (which has the same constraints), or guaranteed in some other fashion (perhaps using a timeout). For example, if the *confirmation* is gated on an *indication* from a subsequent *service provider* then as that indication might never arrive a timeout must be used to ensure the confirmation is eventually sent.
+Also note the assumption is that if a *service user* sends a *service provider* a *request*, the *service user* _will_ get a *confirmation* at some point in time. To significantly simplify the code there should be no error handling for the case that one doesn't arrive. *Providers* must ensure that the *confirmation* is either fast (sent immediately in the routine that processes the *request*), or gated on a *confirmation* from a subsequent *service provider* below (which has the same constraints), or guaranteed in some other fashion (perhaps using a timeout). For example, if the *confirmation* is gated on an *indication* from a subsequent *service provider* then as that indication might never arrive a timeout must be used to ensure the confirmation is eventually sent.
 
 ## Fast vs Slow
 
@@ -136,48 +136,80 @@ Deciding between these two models is something of an art form. The latter is sim
 
 # Implementation in Grease
 
-Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task has a single multiple-producer, single-consumer (mpsc) channel. Both *indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel.
+Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task typically has a single multiple-producer, single-consumer (mpsc) channel from `std::sync::mpsc` but other channels types are not precluded. Notably, when using `mio` it is necessary to use the `mio` channel type, which can make up the `mio` Event poll call when a message arrives. Both *indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel, via boxed trait objects. Once `impl Trait` is stable, we can remove the boxes, but for now, this is the best way to allow a *provider* to be used by a *user* without knowing at compile time what the user is.
 
 The goal is to develop tasks which each implement a well-defined layer of functionality, each with minimal coupling and extensive test cases.
 
 
-## Channel and Message objects
+## ServiceProvider and ServiceUser traits
 
-The *messages* are passed via *channels*. Currently grease makes use of the [`std::sync::mpsc::channel` module](https://doc.rust-lang.org/std/sync/mpsc/), but the creation of channels is wrapped up with the `make_channel` function. This returns [`std::sync::mpsc::Sender<grease::Message>`](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html) with the type alias `MessageSender` and a [`std::sync::mpsc::Receiver<grease::Message>`](https://doc.rust-lang.org/std/sync/mpsc/struct.Receiver.html) with the type alias `MessageReceiver`. There must only ever be exactly one `MessageReceiver` for a given channel, and it is owned by a task which iterates on the `MessageReceiver` to receive messages and provide the appropriate service. Tasks use the `MessageSender` object to send messages to each other (either up or down the stack), and this object can be cloned and copied around as many tasks as require it. Unlike some systems, there is no central library of `MessageSender` objects, and they cannot not be found using some global static integer or other reference. If a task wishes to use a service, the *MessageSender* for that service must be passed in a task creation time as an argument, or passed down in a *request* from a higher layer. When a *service provider* receives a *request*, that request always includes a `MessageSender`, to be used for sending the corresponding *confirmation* back. It may also be appropriate to store a copy of the `MessageSender` for sending *indications* at a later date, depending on the design of the service.
+Each layer implements `Request`, `Confirm`, `Indication` and `Response` enum types containing the messages for the service it provides. Each layer must then provide a type (usually called `Handle`) which implements the `grease::ServiceProvider` trait typed on those four layer-specific message enums. The task initialisation function should return a `ServiceProviderHandle` which can then be passed to any task wishing to use that service.
 
-The `grease::Message` type is an enumeration of `Request`, `Confirmation`, `Indication` and `Response`. Each of these enumerators has a single argument representing all of the messages of the corresponding type from all of the tasks in the system. Thus all messages in the system can be represented by the `Message` type. There are various levels of discrimination (message type, module name, message name) and at the message name level, the Message contains a boxed struct which contains the parmeters in the message (if any). To aid the construction of a `Message` from a message body, message bodies implement either the `RequestSendable` or `NonRequestSendable` traits, depending on whether the message is a Request (and hence has a `reply_to` field) or one of the other three types (which do not). This gives message bodies a `wrap()` function, which takes the message body and wraps it in a Message containing the appropriate discriminators. Because the trait implementations are largely boiler-plate, they are created using the macros `make_request!`, `make_indication!`, `make_confirmation!` and `make_response!`.
+With every `Request`, the provider is given a `ServiceUserHandle` which is boxed trait object implementing `ServiceUser`. The *user* of a service must implement `ServiceUser` with the *provider's* `Confirm` and `Indication` traits for each service it wishes to use. This indicates that the *user* is willing to accept the messages from the *providers*.
+
+The `ServiceProviderHandle` and `ServiceUserHandle` objects may be cloned as necessary, for example so that one *provider* can be used by multiple *users*, or so that a *provider* may retain the `ServiceUserHandle` for later use (for example, for subsequent indications).
 
 The best way to get a feel for how this fits together, is to look at one of the example tasks.
 
 ## Tasks
 
-Tasks are functions which iterate over a `MessageReceiver` and then call an appropriate handler function based on the message received. For example:
+Internally, Tasks are functions which iterate over their internal channel and then call an appropriate handler function based on the message received. For example:
 
 ```rust
-use grease::{Confirmation, Indication, Message, MessageReceiver, MessageSender, Request};
-
 struct TaskContext { ... };
 
-fn main_loop(rx: MessageReceiver, tx: MessageSender) {
-    let t = TaskContext::new(tx);
-    for msg in rx.iter() {
-        t.handle(msg);
-    }
-    panic!("This task should never die!");
+struct Handle {
+    chan: std::sync::mpsc::Sender;
+}
+
+enum Incoming {
+    FooInd(foo::Indication),
+    FooCfm(foo::Confirm),
+    OurRequest(Request, ServiceUserHandle),
+    OurResponse(Response)
+}
+
+/// Stuff their confirms/inds into the channel
+impl foo::ServiceProviderUser for Handle {
+    ...
+}
+
+/// Stuff our requests/responses into the channel
+impl ServiceProviderUser for Handle {
+    ...
+}
+
+pub fn make_task(foo_handle: foo::ServiceProviderHandle) -> ServiceProviderHandle {
+    let (tx, rx) = mpsc::channel();
+    let our_handle = Handle { chan: tx.clone() };
+    std::thread::spawn(move || {
+        let mut t = TaskContext::new(foo_handle, our_handle);
+        for msg in rx.iter() {
+            t.handle(msg);
+        }
+        panic!("This task should never die!");
+    });
+    Box::new(Handle { chan: tx })
 }
 
 impl TaskContext {
-    fn handle(&mut self, msg: Message) {
+    fn new(foo_handle: foo::ServiceProviderHandle, our_handle: Handle) -> TaskContext {
+        ...
+    }
+
+    fn handle(&mut self, msg: Incoming) {
         match msg {
-            // This is the foo task, so we get Foo requests from above
-            Message::Request(ref reply_to, Request::Foo(ref x)) => {
-                self.handle_foo_req(x, reply_to)
+            // This is one of our requests
+            Incoming::OurRequest(req, reply_to) => {
+                self.handle_req(req, reply_to)
             }
             // We use the bar service so we expect to get confirmations and indications from it
-            Message::Confirmation(Confirmation::Bar(ref x)) => self.handle_bar_cfm(x),
-            Message::Indication(Indication::Bar(ref x)) => self.handle_bar_ind(x),
-            // If we get here, someone else has made a mistake
-            _ => error!("Unexpected message in foo task: {:?}", msg),
+            Incoming::FooCfm(x) => {
+                self.handle_lower_cfm(x),
+            }
+            Incoming::FooInd(x) => {
+                self.handle_lower_ind(x),
+            }
         }
     }
 }
@@ -185,18 +217,20 @@ impl TaskContext {
 
 ## Logging
 
-Once of the advantages of using a message passing system is the logging. Grease will log every message when it is dropped - that is, when the *service provider* has read it from the channel and finished processing it. This allows you to go back and analyse what happened in your program, step by step. For example:
+Once of the advantages of using a message passing system is the logging. If you `#[derive(Debug)]` you can log every message as it is received. This allows you to go back and analyse what happened in your program, step by step. For example:
 
 ```
-http  : Received Message::Request(Request::Http(Request::Bind(BindReq { addr: "0.0.0.0", port: 80, urls: [ ... ] })));
-socket: Received Message::Request(Request::Socket(Request::Bind(BindReq { addr: "0.0.0.0", port: 80 })));
-http  : Received Message::Confirmation(Confirmation::Socket(Confirmation::Bind(BindCfm { result: SUCCESS, handle: 123 })));
-app   : Received Message::Confirmation(Confirmation::Http(Confirmation::Bind(BindCfm { result: SERVER_STARTED_OK, handle: 456 })));
+http  : Received StartReq { addr: "0.0.0.0", port: 80, urls: [ ... ] };
+socket: Received BindReq { addr: "0.0.0.0", port: 80 };
+http  : Received BindCfm { result: SUCCESS, handle: 123 };
+app   : Received StartCfm { result: SERVER_STARTED_OK, handle: 456 };
 ```
+
+Note - we suggest messages are logged by the receiver, rather than the sender, which is why `http` above logs the `socket::BindCfm` message.
 
 ## Example Application
 
-To demonstrate the system, it includes the following example tasks:
+To demonstrate how this might work, imagine a system with the following tasks:
 
 ```
 +---------------------------+
@@ -232,4 +266,8 @@ Now, consider the limited number of changes required to implement the following 
 +-------------+
 ```
 
-We've added a TLS layer between the HTTP task and the Socket task - the HTTP task might need to tell the TLS task which certificates to serve, but other than that, it should be able to treat a TLS and Socket identically. On the other side, the MySQL task would perhaps implement the same service interface as our earlier noddy 'Database' task but internally would contain the logic required to talk to a remote MySQL database via a socket. We're re-using the socket layer to then talk to that MySQL database.
+We've added a TLS layer between the HTTP task and the Socket task - the HTTP task might need to tell the TLS task which certificates to serve, but other than that, it should be able to treat a TLS and Socket identically. On the other side, the MySQL task would perhaps implement the same service as our earlier noddy 'Database' task but internally would contain the logic required to talk to a remote MySQL database via a socket. We're re-using the socket layer to then talk to that MySQL database.
+
+# Final notes
+
+Grease is currently a proof-of-concept. Basic TCP socket and HTTP functionality has been implemented as greasy tasks, and a couple of examples demonstrate usage of these tasks (or rather, the services they offer). We welcome constructive feedback and suggestions for improvements!
