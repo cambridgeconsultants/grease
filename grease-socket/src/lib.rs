@@ -185,11 +185,12 @@ pub struct RspReceived {
 // ****************************************************************************
 
 /// Users can use this to send us messages.
-pub type ProviderHandle = grease::ProviderHandle<Request, Confirm, Indication, Response>;
+pub type ServiceProviderHandle =
+	grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
 
-/// A `socket` specific wrapper around `grease::UserHandle`. We use this to
+/// A `socket` specific wrapper around `grease::ServiceUserHandle`. We use this to
 /// talk to our users.
-pub type UserHandle = grease::UserHandle<Confirm, Indication>;
+pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 
 /// Represents something a socket service user can hold on to to send us
 /// message.
@@ -235,7 +236,7 @@ pub enum ConnectionType {
 /// The set of all messages that this task can receive.
 enum Incoming {
 	/// One of our own requests that has come in
-	Request(Request, UserHandle),
+	Request(Request, ServiceUserHandle),
 	/// One of our own responses that has come in
 	Response(Response),
 }
@@ -243,7 +244,7 @@ enum Incoming {
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
 	handle: ListenHandle,
-	ind_to: UserHandle,
+	ind_to: ServiceUserHandle,
 	listener: mio::tcp::TcpListener,
 }
 
@@ -252,13 +253,13 @@ struct PendingWrite {
 	context: Context,
 	sent: usize,
 	data: Vec<u8>,
-	reply_to: UserHandle,
+	reply_to: ServiceUserHandle,
 }
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
 	// parent: ListenHandle,
-	ind_to: UserHandle,
+	ind_to: ServiceUserHandle,
 	handle: ConnHandle,
 	connection: mio::tcp::TcpStream,
 	/// There's a read the user hasn't process yet
@@ -306,7 +307,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> ProviderHandle {
+pub fn make_task() -> ServiceProviderHandle {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
@@ -548,7 +549,7 @@ impl TaskContext {
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self, req: Request, reply_to: UserHandle) {
+	pub fn handle_socket_req(&mut self, req: Request, reply_to: ServiceUserHandle) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::Close(x) => self.handle_close(x, reply_to),
@@ -557,7 +558,7 @@ impl TaskContext {
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: UserHandle) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
 		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
 		match req_bind.conn_type {
 			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
@@ -565,7 +566,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: UserHandle) {
+	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
 				let h = self.next_handle.take();
@@ -605,7 +606,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self, req_close: ReqClose, reply_to: UserHandle) {
+	fn handle_close(&mut self, req_close: ReqClose, reply_to: ServiceUserHandle) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -624,7 +625,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self, req_send: ReqSend, reply_to: UserHandle) {
+	fn handle_send(&mut self, req_send: ReqSend, reply_to: ServiceUserHandle) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -725,7 +726,7 @@ impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle 
 		self.chan.send(Incoming::Response(rsp)).unwrap();
 	}
 
-	fn clone(&self) -> ProviderHandle {
+	fn clone(&self) -> ServiceProviderHandle {
 		Box::new(Handle {
 			chan: self.chan.clone(),
 		})

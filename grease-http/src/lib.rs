@@ -187,11 +187,11 @@ pub struct IndClosed {
 // ****************************************************************************
 
 /// Users can use this to send us messages.
-pub type ProviderHandle = grease::ProviderHandle<Request, Confirm, Indication, ()>;
+pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, ()>;
 
-/// A `http` specific wrapper around `grease::UserHandle`. We use this to
+/// A `http` specific wrapper around `grease::ServiceUserHandle`. We use this to
 /// talk to our users.
-pub type UserHandle = grease::UserHandle<Confirm, Indication>;
+pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 
 /// Represents something an http service user can hold on to to send us
 /// message.
@@ -234,7 +234,7 @@ pub enum Error {
 /// The set of all messages that this task can receive.
 enum Incoming {
 	/// One of our own requests that has come in
-	Request(Request, UserHandle),
+	Request(Request, ServiceUserHandle),
 	/// Socket indication
 	SocketInd(socket::Indication),
 	/// Socket confirm
@@ -251,7 +251,7 @@ enum CfmType {
 /// for a Cfm from the socket task, use a PendingCfm to store
 /// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
-	reply_to: UserHandle,
+	reply_to: ServiceUserHandle,
 	context: Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
@@ -268,7 +268,7 @@ struct Server {
 	/// The handle by which the upper layer refers to us
 	our_handle: ServerHandle,
 	/// Who to tell about the new connections we get
-	ind_to: UserHandle,
+	ind_to: ServiceUserHandle,
 }
 
 struct Connection {
@@ -289,7 +289,7 @@ struct Connection {
 
 struct TaskContext {
 	/// Who we send socket messages to
-	socket: socket::ProviderHandle,
+	socket: socket::ServiceProviderHandle,
 	/// How the tasks we use send messages to us
 	reply_to: Handle,
 	/// Our list of servers, indexed by the handle given in CfmBind
@@ -313,7 +313,7 @@ type ReplyContext = grease::ReplyContext<Confirm, Indication>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: socket::ProviderHandle) -> ProviderHandle {
+pub fn make_task(socket: socket::ServiceProviderHandle) -> ServiceProviderHandle {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx.clone() };
 	std::thread::spawn(move || {
@@ -335,7 +335,7 @@ pub fn make_task(socket: socket::ProviderHandle) -> ProviderHandle {
 /// All our handler functions are methods on this TaskContext structure.
 impl TaskContext {
 	/// Create a new TaskContext
-	fn new(socket: socket::ProviderHandle, us: Handle) -> TaskContext {
+	fn new(socket: socket::ServiceProviderHandle, us: Handle) -> TaskContext {
 		TaskContext {
 			socket: socket,
 			servers: MultiMap::new(),
@@ -383,7 +383,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_http_req(&mut self, req: Request, reply_to: UserHandle) {
+	fn handle_http_req(&mut self, req: Request, reply_to: ServiceUserHandle) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::ResponseStart(x) => self.handle_responsestart(x, reply_to),
@@ -391,7 +391,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: UserHandle) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
 		let reply_ctx = ReplyContext {
 			context: req_bind.context,
 			reply_to: reply_to.clone(),
@@ -484,7 +484,7 @@ impl TaskContext {
 	}
 
 	/// @todo We should we check they call this once and only once.
-	fn handle_responsestart(&mut self, req_start: ReqResponseStart, reply_to: UserHandle) {
+	fn handle_responsestart(&mut self, req_start: ReqResponseStart, reply_to: ServiceUserHandle) {
 		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
 			let skt = {
 				let conn = self.get_conn_by_http_handle(&req_start.handle).unwrap();
@@ -526,7 +526,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_responsebody(&mut self, req_body: ReqResponseBody, reply_to: UserHandle) {
+	fn handle_responsebody(&mut self, req_body: ReqResponseBody, reply_to: ServiceUserHandle) {
 		if self.get_conn_by_http_handle(&req_body.handle).is_some() {
 			let mut close_after = false;
 			let skt = {
@@ -840,7 +840,7 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 		self.chan.send(Incoming::SocketInd(ind)).unwrap();
 	}
 
-	fn clone(&self) -> socket::UserHandle {
+	fn clone(&self) -> socket::ServiceUserHandle {
 		Box::new(Handle {
 			chan: self.chan.clone(),
 		})
@@ -856,7 +856,7 @@ impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
 
 	fn send_response(&self, _rsp: ()) {}
 
-	fn clone(&self) -> ProviderHandle {
+	fn clone(&self) -> ServiceProviderHandle {
 		Box::new(Handle {
 			chan: self.chan.clone(),
 		})
@@ -870,9 +870,9 @@ impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
 // 	use socket;
 
 // 	fn bind_port(
-// 		this_thread: &UserHandle,
+// 		this_thread: &ServiceUserHandle,
 // 		test_rx: &MessageReceiver,
-// 		http_thread: &UserHandle,
+// 		http_thread: &ServiceUserHandle,
 // 		addr: &str,
 // 		ctx: Context,
 // 		socket_handle: socket::ListenHandle,

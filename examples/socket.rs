@@ -50,7 +50,7 @@ impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
 		self.chan.send(Incoming::SocketIndication(ind)).unwrap();
 	}
 
-	fn clone(&self) -> socket::UserHandle {
+	fn clone(&self) -> socket::ServiceUserHandle {
 		Box::new(Handle {
 			chan: self.chan.clone(),
 		})

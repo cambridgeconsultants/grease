@@ -52,7 +52,7 @@ impl grease::ServiceUser<http::Confirm, http::Indication> for Handle {
 		self.chan.send(Incoming::HttpIndication(ind)).unwrap();
 	}
 
-	fn clone(&self) -> http::UserHandle {
+	fn clone(&self) -> http::ServiceUserHandle {
 		Box::new(Handle {
 			chan: self.chan.clone(),
 		})

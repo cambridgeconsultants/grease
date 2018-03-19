@@ -95,8 +95,13 @@ pub trait ServiceProvider<REQ, CFM, IND, RSP> {
 	/// Call this to send a response to this provider.
 	fn send_response(&self, rsp: RSP);
 	/// Call this to clone this object so another task can use it.
-	fn clone(&self) -> ProviderHandle<REQ, CFM, IND, RSP>;
+	fn clone(&self) -> ServiceProviderHandle<REQ, CFM, IND, RSP>;
 }
+
+/// A boxed trait object, which a user can use to send messages in to a
+/// provider.
+pub type ServiceProviderHandle<REQ, CFM, IND, RSP> =
+	Box<ServiceProvider<REQ, CFM, IND, RSP> + Send>;
 
 /// A Service User consumes the service provided by a Service Provider.
 ///
@@ -109,16 +114,12 @@ pub trait ServiceUser<CFM, IND> {
 	/// Call this to send an indication to the service user.
 	fn send_indication(&self, ind: IND);
 	/// Call this so we can store this user reference in two places.
-	fn clone(&self) -> UserHandle<CFM, IND>;
+	fn clone(&self) -> ServiceUserHandle<CFM, IND>;
 }
 
-/// A boxed trait object, which the provider can use to send messages
-/// back to the user.
-pub type UserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
-
-/// A boxed trait object, which a user can use to send messages
-/// in to a provider.
-pub type ProviderHandle<REQ, CFM, IND, RSP> = Box<ServiceProvider<REQ, CFM, IND, RSP> + Send>;
+/// A boxed trait object, which the provider can use to send messages back to
+/// the user.
+pub type ServiceUserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 
 /// A type used to passing context between layers. If each layer maintains
 /// a `HashMap<Context, T>`, when a confirmation comes back from the layer
@@ -133,7 +134,7 @@ pub struct Context(usize);
 /// essential details are recorded so that a Confirmation can be sent at a
 /// later date.
 pub struct ReplyContext<CFM, IND> {
-	pub reply_to: UserHandle<CFM, IND>,
+	pub reply_to: ServiceUserHandle<CFM, IND>,
 	pub context: Context,
 }
 
