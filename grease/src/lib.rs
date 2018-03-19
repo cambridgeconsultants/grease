@@ -89,6 +89,10 @@ pub mod prelude;
 /// types `Self::Request` and `Self::Response` respectively. They can be any
 /// type, but typically they are tagged enumerations where each tag is a
 /// different message.
+///
+/// The `clone` function returns the boxed trait, as the trait must be object
+/// safe - that is, it cannot refer to `Self` (which the normal implementation
+/// of `clone` would naturally do).
 pub trait ServiceProvider<REQ, CFM, IND, RSP> {
 	/// Call this to send a request to this provider.
 	fn send_request(&self, req: REQ, reply_to: &ServiceUser<CFM, IND>);
@@ -108,6 +112,10 @@ pub type ServiceProviderHandle<REQ, CFM, IND, RSP> =
 /// This means it must handle Indications and Confirms. It must also be
 /// cloneable, so that we can keep copies for use later (with subsequent
 /// indications, for example).
+///
+/// The `clone` function returns the boxed trait, as the trait must be object
+/// safe - that is, it cannot refer to `Self` (which the normal implementation
+/// of `clone` would naturally do).
 pub trait ServiceUser<CFM, IND> {
 	/// Call this to send a confirmation back to the service user.
 	fn send_confirm(&self, cfm: CFM);
