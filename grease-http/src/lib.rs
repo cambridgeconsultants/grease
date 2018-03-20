@@ -414,11 +414,14 @@ impl TaskContext {
 			our_handle: self.next_ctx.take(),
 			ind_to: reply_to.clone(),
 		};
-		self.socket.send_request(socket::ReqBind {
-			addr: req_bind.addr,
-			context: server.our_handle,
-			conn_type: socket::ConnectionType::Stream,
-		}.into(), &self.reply_to);
+		self.socket.send_request(
+			socket::ReqBind {
+				addr: req_bind.addr,
+				context: server.our_handle,
+				conn_type: socket::ConnectionType::Stream,
+			}.into(),
+			&self.reply_to,
+		);
 		self.servers.insert(server.our_handle, None, server);
 	}
 
@@ -524,14 +527,15 @@ impl TaskContext {
 				close_after: req_start.length == Some(0),
 			};
 			self.pending.insert(req.context, pend);
-			self.socket
-				.send_request(req.into(), &self.reply_to);
+			self.socket.send_request(req.into(), &self.reply_to);
 		} else {
-			reply_to.send_confirm(CfmResponseStart {
-				context: req_start.context,
-				handle: req_start.handle,
-				result: Err(Error::BadHandle),
-			}.into());
+			reply_to.send_confirm(
+				CfmResponseStart {
+					context: req_start.context,
+					handle: req_start.handle,
+					result: Err(Error::BadHandle),
+				}.into(),
+			);
 		}
 	}
 
@@ -543,20 +547,24 @@ impl TaskContext {
 				match conn.body_length {
 					Some(0) => {
 						// This response has no body
-						reply_to.send_confirm(CfmResponseBody {
-							context: req_body.context,
-							handle: req_body.handle,
-							result: Err(Error::BadHandle),
-						}.into());
+						reply_to.send_confirm(
+							CfmResponseBody {
+								context: req_body.context,
+								handle: req_body.handle,
+								result: Err(Error::BadHandle),
+							}.into(),
+						);
 						return;
 					}
 					Some(len) if req_body.data.len() > len => {
 						// This body is too long
-						reply_to.send_confirm(CfmResponseBody {
-							context: req_body.context,
-							handle: req_body.handle,
-							result: Err(Error::BadHandle),
-						}.into());
+						reply_to.send_confirm(
+							CfmResponseBody {
+								context: req_body.context,
+								handle: req_body.handle,
+								result: Err(Error::BadHandle),
+							}.into(),
+						);
 						return;
 					}
 					Some(len) if req_body.data.len() == len => {
@@ -588,8 +596,7 @@ impl TaskContext {
 					close_after: close_after,
 				};
 				self.pending.insert(req.context, pend);
-				self.socket
-					.send_request(req.into(), &self.reply_to);
+				self.socket.send_request(req.into(), &self.reply_to);
 			} else {
 				// Close connection now!
 				let req = socket::ReqClose {
@@ -604,16 +611,17 @@ impl TaskContext {
 					close_after: false,
 				};
 				self.pending.insert(req.context, pend);
-				self.socket
-					.send_request(req.into(), &self.reply_to);
+				self.socket.send_request(req.into(), &self.reply_to);
 				let _ = self.connections.remove(&req_body.handle);
 			}
 		} else {
-			reply_to.send_confirm(CfmResponseBody {
-				context: req_body.context,
-				handle: req_body.handle,
-				result: Err(Error::BadHandle),
-			}.into());
+			reply_to.send_confirm(
+				CfmResponseBody {
+					context: req_body.context,
+					handle: req_body.handle,
+					result: Err(Error::BadHandle),
+				}.into(),
+			);
 		}
 	}
 
@@ -623,20 +631,25 @@ impl TaskContext {
 		r.add_header("Content-Type", "text/plain");
 		let mut output = Vec::new();
 		if let Ok(_) = r.write(&mut output) {
-			self.socket.send_request(socket::ReqSend {
-				handle: *handle,
-				context: Context::default(),
-				data: output,
-			}.into(), &self.reply_to);
+			self.socket.send_request(
+				socket::ReqSend {
+					handle: *handle,
+					context: Context::default(),
+					data: output,
+				}.into(),
+				&self.reply_to,
+			);
 		} else {
 			warn!("Failed to render error");
 		}
 
-		self.socket
-			.send_request(socket::ReqClose {
-			handle: *handle,
-			context: Context::default(),
-		}.into(), &self.reply_to);
+		self.socket.send_request(
+			socket::ReqClose {
+				handle: *handle,
+				context: Context::default(),
+			}.into(),
+			&self.reply_to,
+		);
 	}
 
 	fn map_result<T>(result: Result<T, socket::SocketError>) -> Result<(), Error> {
@@ -657,17 +670,21 @@ impl TaskContext {
 				Ok(ref handle) => {
 					server.listen_handle = Some(*handle);
 					// Re-insert, but with socket handle as second key
-					reply_ctx.reply_to.send_confirm(CfmBind {
-						context: reply_ctx.context,
-						result: Ok(server.our_handle),
-					}.into());
+					reply_ctx.reply_to.send_confirm(
+						CfmBind {
+							context: reply_ctx.context,
+							result: Ok(server.our_handle),
+						}.into(),
+					);
 					self.servers.insert(cfm_bind.context, Some(*handle), server);
 				}
 				Err(ref err) => {
-					reply_ctx.reply_to.send_confirm(CfmBind {
-						context: reply_ctx.context,
-						result: Err(Error::SocketError(*err)),
-					}.into());
+					reply_ctx.reply_to.send_confirm(
+						CfmBind {
+							context: reply_ctx.context,
+							result: Err(Error::SocketError(*err)),
+						}.into(),
+					);
 				}
 			}
 		} else {
@@ -681,18 +698,22 @@ impl TaskContext {
 			// Close out whatever triggered this close
 			match pend.cfm_type {
 				CfmType::Start => {
-					pend.reply_to.send_confirm(CfmResponseStart {
-						context: pend.context,
-						handle: pend.handle,
-						result: TaskContext::map_result(cfm.result),
-					}.into());
+					pend.reply_to.send_confirm(
+						CfmResponseStart {
+							context: pend.context,
+							handle: pend.handle,
+							result: TaskContext::map_result(cfm.result),
+						}.into(),
+					);
 				}
 				CfmType::Body => {
-					pend.reply_to.send_confirm(CfmResponseBody {
-						context: pend.context,
-						handle: pend.handle,
-						result: TaskContext::map_result(cfm.result),
-					}.into());
+					pend.reply_to.send_confirm(
+						CfmResponseBody {
+							context: pend.context,
+							handle: pend.handle,
+							result: TaskContext::map_result(cfm.result),
+						}.into(),
+					);
 				}
 				CfmType::Close => {
 					// Nothing to send - internally generated
@@ -710,18 +731,22 @@ impl TaskContext {
 		if let Some(pend) = self.pending.remove(&cfm.context) {
 			match pend.cfm_type {
 				CfmType::Start => {
-					pend.reply_to.send_confirm(CfmResponseStart {
-						context: pend.context,
-						handle: pend.handle,
-						result: TaskContext::map_result(cfm.result),
-					}.into());
+					pend.reply_to.send_confirm(
+						CfmResponseStart {
+							context: pend.context,
+							handle: pend.handle,
+							result: TaskContext::map_result(cfm.result),
+						}.into(),
+					);
 				}
 				CfmType::Body => {
-					pend.reply_to.send_confirm(CfmResponseBody {
-						context: pend.context,
-						handle: pend.handle,
-						result: TaskContext::map_result(cfm.result),
-					}.into());
+					pend.reply_to.send_confirm(
+						CfmResponseBody {
+							context: pend.context,
+							handle: pend.handle,
+							result: TaskContext::map_result(cfm.result),
+						}.into(),
+					);
 				}
 				CfmType::Close => {
 					// Should never happen
@@ -743,8 +768,7 @@ impl TaskContext {
 				};
 				let _ = self.connections.remove(&pend.handle);
 				self.pending.insert(req.context, pend);
-				self.socket
-					.send_request(req.into(), &self.reply_to);
+				self.socket.send_request(req.into(), &self.reply_to);
 			}
 		}
 	}
@@ -796,13 +820,15 @@ impl TaskContext {
 		match r {
 			Some((rushttp::request::ParseResult::Complete(req, _), ch, sh, ind_to)) => {
 				// All done!
-				ind_to.send_indication(IndRxRequest {
-					server_handle: sh,
-					connection_handle: ch,
-					url: req.uri().clone(),
-					method: req.method().clone(),
-					headers: req.headers().clone(),
-				}.into());
+				ind_to.send_indication(
+					IndRxRequest {
+						server_handle: sh,
+						connection_handle: ch,
+						url: req.uri().clone(),
+						method: req.method().clone(),
+						headers: req.headers().clone(),
+					}.into(),
+				);
 			}
 			Some((rushttp::request::ParseResult::InProgress, _, _, _)) => {
 				// Need more data

@@ -82,11 +82,14 @@ fn main() {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
 
-	socket_task.send_request(socket::ReqBind {
-		context: Context::default(),
-		addr: bind_addr,
-		conn_type: socket::ConnectionType::Stream,
-	}.into(), &handle);
+	socket_task.send_request(
+		socket::ReqBind {
+			context: Context::default(),
+			addr: bind_addr,
+			conn_type: socket::ConnectionType::Stream,
+		}.into(),
+		&handle,
+	);
 
 	let mut n: Context = Context::default();
 
@@ -95,11 +98,14 @@ fn main() {
 			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
 				socket_task.send_response(socket::RspReceived { handle: ind.handle }.into());
 				info!("Echoing {} bytes of input", ind.data.len());
-				socket_task.send_request(socket::ReqSend {
-					handle: ind.handle,
-					data: ind.data,
-					context: n.take(),
-				}.into(), &handle);
+				socket_task.send_request(
+					socket::ReqSend {
+						handle: ind.handle,
+						data: ind.data,
+						context: n.take(),
+					}.into(),
+					&handle,
+				);
 			}
 			Incoming::SocketIndication(socket::Indication::Connected(ind)) => {
 				info!(

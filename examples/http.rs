@@ -85,10 +85,13 @@ fn main() {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
 
-	http_thread.send_request(http::ReqBind {
-		addr: bind_addr,
-		context: Context::default(),
-	}.into(), &handle);
+	http_thread.send_request(
+		http::ReqBind {
+			addr: bind_addr,
+			context: Context::default(),
+		}.into(),
+		&handle,
+	);
 
 	let mut n: Context = Context::default();
 
