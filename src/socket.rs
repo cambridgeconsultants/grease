@@ -26,7 +26,7 @@ use mio_more;
 
 use prelude::*;
 
-use super::{Context, ConfirmationTask, IndicationTask, Message, MessageReceiver, MessageSender,
+use super::{ConfirmationTask, Context, IndicationTask, Message, MessageReceiver, MessageSender,
             RequestTask, ResponseTask};
 
 // ****************************************************************************
@@ -370,8 +370,10 @@ pub fn make_task() -> MessageSender {
 /// MessageSender as we don't send Requests that need replying to.
 fn main_loop(grease_rx: MessageReceiver, _: MessageSender) {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
-	let _ = thread::spawn(move || for msg in grease_rx.iter() {
-		let _ = mio_tx.send(msg);
+	let _ = thread::spawn(move || {
+		for msg in grease_rx.iter() {
+			let _ = mio_tx.send(msg);
+		}
 	});
 	let mut task_context = TaskContext::new(mio_rx);
 	loop {
@@ -514,10 +516,7 @@ impl TaskContext {
 						let left = to_send - len;
 						debug!(
 							"Sent {} of {} pending, leaving {} on handle: {}",
-							len,
-							to_send,
-							left,
-							cs.handle
+							len, to_send, left, cs.handle
 						);
 						pw.sent = pw.sent + len;
 						cs.pending_writes.push_front(pw);
@@ -537,8 +536,7 @@ impl TaskContext {
 					Err(err) => {
 						warn!(
 							"Send error on handle: {} (pending), err: {}",
-							cs.handle,
-							err
+							cs.handle, err
 						);
 						let cfm = CfmSend {
 							handle: cs.handle,
@@ -650,20 +648,16 @@ impl TaskContext {
 							context: req_bind.context,
 						}
 					}
-					Err(io_error) => {
-						CfmBind {
-							result: Err(io_error.into()),
-							context: req_bind.context,
-						}
-					}
+					Err(io_error) => CfmBind {
+						result: Err(io_error.into()),
+						context: req_bind.context,
+					},
 				}
 			}
-			Err(io_error) => {
-				CfmBind {
-					result: Err(io_error.into()),
-					context: req_bind.context,
-				}
-			}
+			Err(io_error) => CfmBind {
+				result: Err(io_error.into()),
+				context: req_bind.context,
+			},
 		};
 		reply_to.send_nonrequest(cfm);
 	}
@@ -695,8 +689,7 @@ impl TaskContext {
 			if cs.pending_writes.len() > 0 {
 				debug!(
 					"Storing write len {} on handle: {}",
-					to_send,
-					req_send.handle
+					to_send, req_send.handle
 				);
 				let pw = PendingWrite {
 					sent: 0,
@@ -712,10 +705,7 @@ impl TaskContext {
 						let left = to_send - len;
 						debug!(
 							"Sent {} of {}, leaving {} on handle: {}",
-							len,
-							to_send,
-							left,
-							cs.handle
+							len, to_send, left, cs.handle
 						);
 						let pw = PendingWrite {
 							sent: len,
@@ -1066,7 +1056,6 @@ mod test {
 			}
 			_ => panic!("Bad match"),
 		};
-
 	}
 
 	#[test]
@@ -1159,7 +1148,6 @@ mod test {
 		};
 
 		test_rx.check_empty();
-
 	}
 }
 

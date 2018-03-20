@@ -127,10 +127,10 @@ struct TaskContext {
 /// to send this task messages.
 pub fn make_task(http: &::MessageSender) -> ::MessageSender {
 	let local_http = http.clone();
-	::make_task("webserv", move |rx: ::MessageReceiver,
-	      tx: ::MessageSender| {
-		main_loop(rx, tx, local_http)
-	})
+	::make_task(
+		"webserv",
+		move |rx: ::MessageReceiver, tx: ::MessageSender| main_loop(rx, tx, local_http),
+	)
 }
 
 // ****************************************************************************
