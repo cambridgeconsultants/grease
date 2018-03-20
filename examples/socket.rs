@@ -81,14 +81,13 @@ fn main() {
 	let socket_thread = socket::make_task();
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
-	{
-		let bind_req = socket::Request::Bind(socket::ReqBind {
-			context: Context::default(),
-			addr: bind_addr,
-			conn_type: socket::ConnectionType::Stream,
-		});
-		socket_thread.send_request(bind_req, &handle);
-	}
+
+	let bind_req = socket::Request::Bind(socket::ReqBind {
+		context: Context::default(),
+		addr: bind_addr,
+		conn_type: socket::ConnectionType::Stream,
+	});
+	socket_thread.send_request(bind_req, &handle);
 
 	let mut n: Context = Context::default();
 

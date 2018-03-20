@@ -176,6 +176,14 @@ impl Context {
 	pub fn as_usize(&self) -> usize {
 		self.0
 	}
+
+	/// You can use take to grab a copy of the current value,
+	/// while incrementing it ready for the next use.
+	pub fn take(&mut self) -> Context {
+		let result = Context(self.0);
+		self.0 = self.0.wrapping_add(1);
+		result
+	}
 }
 
 impl Default for Context {
@@ -187,16 +195,6 @@ impl Default for Context {
 impl std::fmt::Display for Context {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		write!(f, "Context({})", self.0)
-	}
-}
-
-impl Context {
-	/// You can use take to grab a copy of the current value,
-	/// while incrementing it ready for the next use.
-	pub fn take(&mut self) -> Context {
-		let result = Context(self.0);
-		self.0 = self.0.wrapping_add(1);
-		result
 	}
 }
 
