@@ -12,7 +12,6 @@ extern crate grease_http as http;
 extern crate grease_socket as socket;
 #[macro_use]
 extern crate log;
-extern crate time;
 
 use std::sync::mpsc;
 use std::net;
