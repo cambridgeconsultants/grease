@@ -40,6 +40,7 @@
 //
 // ****************************************************************************
 
+#[macro_use]
 extern crate grease;
 extern crate grease_socket as socket;
 #[macro_use]
@@ -75,6 +76,10 @@ pub enum Request {
 	ResponseBody(ReqResponseBody),
 }
 
+make_wrapper!(ReqBind, Request, Request::Bind);
+make_wrapper!(ReqResponseStart, Request, Request::ResponseStart);
+make_wrapper!(ReqResponseBody, Request, Request::ResponseBody);
+
 /// Confirms that must be sent back to the http task.
 #[derive(Debug)]
 pub enum Confirm {
@@ -86,6 +91,10 @@ pub enum Confirm {
 	ResponseBody(CfmResponseBody),
 }
 
+make_wrapper!(CfmBind, Confirm, Confirm::Bind);
+make_wrapper!(CfmResponseStart, Confirm, Confirm::ResponseStart);
+make_wrapper!(CfmResponseBody, Confirm, Confirm::ResponseBody);
+
 /// Indications that come out of the http task.
 #[derive(Debug)]
 pub enum Indication {
@@ -94,6 +103,9 @@ pub enum Indication {
 	/// An HTTP connection has been dropped
 	Closed(IndClosed),
 }
+
+make_wrapper!(IndRxRequest, Indication, Indication::RxRequest);
+make_wrapper!(IndClosed, Indication, Indication::Closed);
 
 /// A bind request - start an HTTP server on a given port.
 #[derive(Debug)]
@@ -402,13 +414,11 @@ impl TaskContext {
 			our_handle: self.next_ctx.take(),
 			ind_to: reply_to.clone(),
 		};
-		let req = socket::ReqBind {
+		self.socket.send_request(socket::ReqBind {
 			addr: req_bind.addr,
 			context: server.our_handle,
 			conn_type: socket::ConnectionType::Stream,
-		};
-		self.socket
-			.send_request(socket::Request::Bind(req), &self.reply_to);
+		}.into(), &self.reply_to);
 		self.servers.insert(server.our_handle, None, server);
 	}
 
@@ -515,14 +525,13 @@ impl TaskContext {
 			};
 			self.pending.insert(req.context, pend);
 			self.socket
-				.send_request(socket::Request::Send(req), &self.reply_to);
+				.send_request(req.into(), &self.reply_to);
 		} else {
-			let cfm = CfmResponseStart {
+			reply_to.send_confirm(CfmResponseStart {
 				context: req_start.context,
 				handle: req_start.handle,
 				result: Err(Error::BadHandle),
-			};
-			reply_to.send_confirm(Confirm::ResponseStart(cfm));
+			}.into());
 		}
 	}
 
@@ -534,22 +543,20 @@ impl TaskContext {
 				match conn.body_length {
 					Some(0) => {
 						// This response has no body
-						let cfm = CfmResponseBody {
+						reply_to.send_confirm(CfmResponseBody {
 							context: req_body.context,
 							handle: req_body.handle,
 							result: Err(Error::BadHandle),
-						};
-						reply_to.send_confirm(Confirm::ResponseBody(cfm));
+						}.into());
 						return;
 					}
 					Some(len) if req_body.data.len() > len => {
 						// This body is too long
-						let cfm = CfmResponseBody {
+						reply_to.send_confirm(CfmResponseBody {
 							context: req_body.context,
 							handle: req_body.handle,
 							result: Err(Error::BadHandle),
-						};
-						reply_to.send_confirm(Confirm::ResponseBody(cfm));
+						}.into());
 						return;
 					}
 					Some(len) if req_body.data.len() == len => {
@@ -582,7 +589,7 @@ impl TaskContext {
 				};
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Send(req), &self.reply_to);
+					.send_request(req.into(), &self.reply_to);
 			} else {
 				// Close connection now!
 				let req = socket::ReqClose {
@@ -598,16 +605,15 @@ impl TaskContext {
 				};
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Close(req), &self.reply_to);
+					.send_request(req.into(), &self.reply_to);
 				let _ = self.connections.remove(&req_body.handle);
 			}
 		} else {
-			let cfm = CfmResponseBody {
+			reply_to.send_confirm(CfmResponseBody {
 				context: req_body.context,
 				handle: req_body.handle,
 				result: Err(Error::BadHandle),
-			};
-			reply_to.send_confirm(Confirm::ResponseBody(cfm));
+			}.into());
 		}
 	}
 
@@ -617,23 +623,20 @@ impl TaskContext {
 		r.add_header("Content-Type", "text/plain");
 		let mut output = Vec::new();
 		if let Ok(_) = r.write(&mut output) {
-			let req = socket::ReqSend {
+			self.socket.send_request(socket::ReqSend {
 				handle: *handle,
 				context: Context::default(),
 				data: output,
-			};
-			self.socket
-				.send_request(socket::Request::Send(req), &self.reply_to);
+			}.into(), &self.reply_to);
 		} else {
 			warn!("Failed to render error");
 		}
 
-		let close_req = socket::ReqClose {
+		self.socket
+			.send_request(socket::ReqClose {
 			handle: *handle,
 			context: Context::default(),
-		};
-		self.socket
-			.send_request(socket::Request::Close(close_req), &self.reply_to);
+		}.into(), &self.reply_to);
 	}
 
 	fn map_result<T>(result: Result<T, socket::SocketError>) -> Result<(), Error> {
@@ -653,20 +656,18 @@ impl TaskContext {
 			match cfm_bind.result {
 				Ok(ref handle) => {
 					server.listen_handle = Some(*handle);
-					let cfm = CfmBind {
+					// Re-insert, but with socket handle as second key
+					reply_ctx.reply_to.send_confirm(CfmBind {
 						context: reply_ctx.context,
 						result: Ok(server.our_handle),
-					};
-					// Re-insert, but with socket handle as second key
-					reply_ctx.reply_to.send_confirm(Confirm::Bind(cfm));
+					}.into());
 					self.servers.insert(cfm_bind.context, Some(*handle), server);
 				}
 				Err(ref err) => {
-					let cfm = CfmBind {
+					reply_ctx.reply_to.send_confirm(CfmBind {
 						context: reply_ctx.context,
 						result: Err(Error::SocketError(*err)),
-					};
-					reply_ctx.reply_to.send_confirm(Confirm::Bind(cfm));
+					}.into());
 				}
 			}
 		} else {
@@ -680,20 +681,18 @@ impl TaskContext {
 			// Close out whatever triggered this close
 			match pend.cfm_type {
 				CfmType::Start => {
-					let msg = CfmResponseStart {
+					pend.reply_to.send_confirm(CfmResponseStart {
 						context: pend.context,
 						handle: pend.handle,
 						result: TaskContext::map_result(cfm.result),
-					};
-					pend.reply_to.send_confirm(Confirm::ResponseStart(msg));
+					}.into());
 				}
 				CfmType::Body => {
-					let msg = CfmResponseBody {
+					pend.reply_to.send_confirm(CfmResponseBody {
 						context: pend.context,
 						handle: pend.handle,
 						result: TaskContext::map_result(cfm.result),
-					};
-					pend.reply_to.send_confirm(Confirm::ResponseBody(msg));
+					}.into());
 				}
 				CfmType::Close => {
 					// Nothing to send - internally generated
@@ -702,7 +701,7 @@ impl TaskContext {
 			let ind = IndClosed {
 				handle: pend.handle,
 			};
-			pend.reply_to.send_indication(Indication::Closed(ind));
+			pend.reply_to.send_indication(ind.into());
 		}
 	}
 
@@ -711,20 +710,18 @@ impl TaskContext {
 		if let Some(pend) = self.pending.remove(&cfm.context) {
 			match pend.cfm_type {
 				CfmType::Start => {
-					let msg = CfmResponseStart {
+					pend.reply_to.send_confirm(CfmResponseStart {
 						context: pend.context,
 						handle: pend.handle,
 						result: TaskContext::map_result(cfm.result),
-					};
-					pend.reply_to.send_confirm(Confirm::ResponseStart(msg));
+					}.into());
 				}
 				CfmType::Body => {
-					let msg = CfmResponseBody {
+					pend.reply_to.send_confirm(CfmResponseBody {
 						context: pend.context,
 						handle: pend.handle,
 						result: TaskContext::map_result(cfm.result),
-					};
-					pend.reply_to.send_confirm(Confirm::ResponseBody(msg));
+					}.into());
 				}
 				CfmType::Close => {
 					// Should never happen
@@ -747,7 +744,7 @@ impl TaskContext {
 				let _ = self.connections.remove(&pend.handle);
 				self.pending.insert(req.context, pend);
 				self.socket
-					.send_request(socket::Request::Close(req), &self.reply_to);
+					.send_request(req.into(), &self.reply_to);
 			}
 		}
 	}
@@ -799,14 +796,13 @@ impl TaskContext {
 		match r {
 			Some((rushttp::request::ParseResult::Complete(req, _), ch, sh, ind_to)) => {
 				// All done!
-				let conn_ind = IndRxRequest {
+				ind_to.send_indication(IndRxRequest {
 					server_handle: sh,
 					connection_handle: ch,
 					url: req.uri().clone(),
 					method: req.method().clone(),
 					headers: req.headers().clone(),
-				};
-				ind_to.send_indication(Indication::RxRequest(conn_ind));
+				}.into());
 			}
 			Some((rushttp::request::ParseResult::InProgress, _, _, _)) => {
 				// Need more data

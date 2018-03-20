@@ -85,13 +85,10 @@ fn main() {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
 
-	{
-		let bind_req = http::ReqBind {
-			addr: bind_addr,
-			context: Context::default(),
-		};
-		http_thread.send_request(http::Request::Bind(bind_req), &handle);
-	}
+	http_thread.send_request(http::ReqBind {
+		addr: bind_addr,
+		context: Context::default(),
+	}.into(), &handle);
 
 	let mut n: Context = Context::default();
 
@@ -110,13 +107,13 @@ fn main() {
 					length: Some(body_msg.len()),
 					headers: http::HeaderMap::new(),
 				};
-				http_thread.send_request(http::Request::ResponseStart(start), &handle);
+				http_thread.send_request(start.into(), &handle);
 				let body = http::ReqResponseBody {
 					handle: ind.connection_handle,
 					context: ctx,
 					data: body_msg.into_bytes(),
 				};
-				http_thread.send_request(http::Request::ResponseBody(body), &handle);
+				http_thread.send_request(body.into(), &handle);
 			}
 			_ => {}
 		}

@@ -5,6 +5,7 @@
 //! receives asynchronous indications when data arrives on the socket and/or
 //! when the socket closes.
 
+#[macro_use]
 extern crate grease;
 #[macro_use]
 extern crate log;
@@ -44,6 +45,10 @@ pub enum Request {
 	Send(ReqSend),
 }
 
+make_wrapper!(ReqBind, Request, Request::Bind);
+make_wrapper!(ReqClose, Request, Request::Close);
+make_wrapper!(ReqSend, Request, Request::Send);
+
 /// Confirms sent from the Socket task in answer to a Request
 #[derive(Debug)]
 pub enum Confirm {
@@ -54,6 +59,10 @@ pub enum Confirm {
 	/// A Send Confirm - Sent something on a connection
 	Send(CfmSend),
 }
+
+make_wrapper!(CfmBind, Confirm, Confirm::Bind);
+make_wrapper!(CfmClose, Confirm, Confirm::Close);
+make_wrapper!(CfmSend, Confirm, Confirm::Send);
 
 /// Asynchronous indications sent by the Socket task.
 /// TODO: Perhaps indicate EOF/HUP ind here? As distinct from dropping the
@@ -70,6 +79,10 @@ pub enum Indication {
 	Received(IndReceived),
 }
 
+make_wrapper!(IndConnected, Indication, Indication::Connected);
+make_wrapper!(IndDropped, Indication, Indication::Dropped);
+make_wrapper!(IndReceived, Indication, Indication::Received);
+
 /// Responses to Indications required
 #[derive(Debug)]
 pub enum Response {
@@ -77,6 +90,8 @@ pub enum Response {
 	/// be sent
 	Received(RspReceived),
 }
+
+make_wrapper!(RspReceived, Response, Response::Received);
 
 /// Bind a listen socket
 #[derive(Debug)]

@@ -129,6 +129,17 @@ pub trait ServiceUser<CFM, IND> {
 /// the user.
 pub type ServiceUserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
 
+#[macro_export]
+macro_rules! make_wrapper(
+	($v:ident, $s:path, $e:path) => {
+		impl std::convert::Into<$s> for $v {
+			fn into(self) -> $s {
+				$e(self)
+			}
+		}
+	}
+);
+
 /// A type used to passing context between layers. If each layer maintains
 /// a `HashMap<Context, T>`, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.

@@ -78,32 +78,28 @@ fn main() {
 	info!("Hello, this is the grease socket example.");
 	info!("Running echo server on {}", bind_addr);
 
-	let socket_thread = socket::make_task();
+	let socket_task = socket::make_task();
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle { chan: tx };
 
-	let bind_req = socket::Request::Bind(socket::ReqBind {
+	socket_task.send_request(socket::ReqBind {
 		context: Context::default(),
 		addr: bind_addr,
 		conn_type: socket::ConnectionType::Stream,
-	});
-	socket_thread.send_request(bind_req, &handle);
+	}.into(), &handle);
 
 	let mut n: Context = Context::default();
 
 	for msg in rx.iter() {
 		match msg {
 			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
-				let recv_rsp =
-					socket::Response::Received(socket::RspReceived { handle: ind.handle });
-				socket_thread.send_response(recv_rsp);
+				socket_task.send_response(socket::RspReceived { handle: ind.handle }.into());
 				info!("Echoing {} bytes of input", ind.data.len());
-				let send_req = socket::Request::Send(socket::ReqSend {
+				socket_task.send_request(socket::ReqSend {
 					handle: ind.handle,
 					data: ind.data,
 					context: n.take(),
-				});
-				socket_thread.send_request(send_req, &handle);
+				}.into(), &handle);
 			}
 			Incoming::SocketIndication(socket::Indication::Connected(ind)) => {
 				info!(
