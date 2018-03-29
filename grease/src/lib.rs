@@ -1,5 +1,8 @@
 //! # grease - Making threads easier when you have rust.
 //!
+//! Copyright (c) Cambridge Consultants 2018
+//! See the top-level COPYRIGHT file for further information and licensing
+//!
 //! ## Overview
 //!
 //! For an high level overview to grease, see the project's README.md file.

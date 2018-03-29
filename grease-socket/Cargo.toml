@@ -1,7 +1,8 @@
 [package]
 name = "grease-socket"
 version = "0.1.0"
-authors = ["Jonathan 'theJPster' Pallant <github@thejpster.org.uk>"]
+authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
+license-file = "../COPYRIGHT"
 
 [dependencies]
 mio = "0.6"

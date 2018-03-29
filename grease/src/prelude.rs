@@ -1,4 +1,7 @@
 //! This is the list of traits `grease` users should import.
+//!
+//! Copyright (c) Cambridge Consultants 2018
+//! See the top-level COPYRIGHT file for further information and licensing
 
 // ****************************************************************************
 //

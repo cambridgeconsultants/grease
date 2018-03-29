@@ -1,8 +1,9 @@
 [package]
 name = "grease-workspace"
 version = "0.1.0"
-authors = ["theJPster <github@thejpster.org.uk>"]
+authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
 readme = "README.md"
+license-file = "COPYRIGHT"
 
 [dev-dependencies]
 env_logger = "0.5.6"

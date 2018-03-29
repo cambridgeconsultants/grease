@@ -65,7 +65,45 @@ The benefit to designing systems with these stacks is that the Web Browser is ag
 
 Of course, this is all textbook stuff - almost all communications systems are built in this fashion and there are a great many references texts on the subject. Grease is about using a multi-task message passing approach to building these systems.
 
-Now, Grease is not necessaily suitable for implementing the entire stack from top to bottom. For example, your Operating System will usually provide a number of layers, especially for ubiquitous protocols like TCP/IP and Ethernet. The OS will probably also define those interfaces in terms of function calls rather than message passing. But if you are implementing a custom protocol stack for say, Bluetooth, or DECT, or LTE, or for a satellite modem, then Grease will help you do that, and as the 'socket' example task demonstrates, it is quite straightforward to develop a layer in Grease which interacts with a functional interface as the lower layer.
+Now, Grease is not necessaily suitable for implementing the entire stack from top to bottom. For example, your Operating System will usually provide a number of layers, especially for ubiquitous protocols like TCP/IP and Ethernet. The OS will probably also define those interfaces in terms of function calls rather than message passing. But if you are implementing a custom protocol stack for say, Bluetooth, or DECT, or LTE, or for a satellite modem, then Grease will help you do that, and as the 'socket' example task demonstrates, it is quite straightforward to develop a layer in Grease which interacts with a functional interface as the lower layer. Further, even if you are not developing a 'protocol stack' in a traditional sense, you may find your application benefits from a layered approach, and executing those layers as distinct tasks.
+
+To demonstrate how this might work, imagine a basic web-application - perhaps a CMS. You might break down that system into the following tasks:
+
+```
++---------------------------+
+|        Application        |
++-------------+-------------+
+| WebServ     | FileDatabase|
++-------------+-------------+
+| HTTP        |
++-------------+
+| Socket      |
++-------------+
+```
+
+* Application. All the application logic - the top level module. It is a *service user*, but never a *service provider*. It is also known as a *turning point* or a *data inter-working function* - a point where messages stop going up, turn around and start going down again. While we have a single turning point, a big system may have multiple turning points: perhaps one for control traffic and one for data traffic.
+* WebServ. A basic REST server, implementing a small handful of URLs. Each GET or PUT to a URL results in an indication upwards.
+* HTTP. Decodes HTTP requests sent over a socket and formats HTTP responses.
+* SocketServer. Handles TCP sockets in a *greasy* fashion.
+* FileDatabase. Stores the information which Application needs (i.e. our CMS's content), by writing it to the filesystem.
+
+Now, consider the limited number of changes required to implement the following example instead:
+
+```
++---------------------------+
+|        Application        |
++-------------+-------------+
+| WebServ     | MySQL       |
++-------------+-------------+
+| HTTP        | Socket      |
++-------------+-------------+
+| TLS v1.2    |
++-------------+
+| Socket      |
++-------------+
+```
+
+We've added a TLS layer between the HTTP task and the Socket task - the HTTP task might need to tell the TLS task which certificates to serve, but other than that, it should be able to treat a TLS and Socket identically. On the other side, the MySQL task would perhaps implement the same service as our earlier noddy 'Database' task but internally would contain the logic required to talk to a remote MySQL database via a socket. We're re-using the socket layer to then talk to that MySQL database, and we could either share the same Socket task between two users or, if we really wanted, spin up two separate Socket tasks - each with a single user.
 
 ## The Four Messages
 
@@ -228,46 +266,12 @@ app   : Received StartCfm { result: SERVER_STARTED_OK, handle: 456 };
 
 Note - we suggest messages are logged by the receiver, rather than the sender, which is why `http` above logs the `socket::BindCfm` message.
 
-## Example Application
-
-To demonstrate how this might work, imagine a system with the following tasks:
-
-```
-+---------------------------+
-|        Application        |
-+-------------+-------------+
-| WebServ     | Database    |
-+-------------+-------------+
-| HTTP        |
-+-------------+
-| Socket      |
-+-------------+
-```
-
-* Application. All the application logic - the top level module. It is a *service user*, but never a *service provider*. It is also known as a *turning point* or a *data inter-working function* - a point where messages stop going up, turn around and start going down again. While we have a single turning point, a big system may have multiple turning points: perhaps one for control traffic and one for data traffic.
-* WebServ. A basic REST server, implementing a small handful of URLs. Each GET or PUT to a URL results in an indication upwards.
-* HTTP. Decodes HTTP requests sent over a socket and formats HTTP responses.
-* SocketServer. Handles TCP sockets in a *greasy* fashion.
-* Database. Stores information which Application needs to service requests from remote systems.
-
-Now, consider the limited number of changes required to implement the following example instead:
-
-```
-+---------------------------+
-|        Application        |
-+-------------+-------------+
-| WebServ     | MySQL       |
-+-------------+-------------+
-| HTTP        | Socket      |
-+-------------+-------------+
-| TLS v1.2    |
-+-------------+
-| Socket      |
-+-------------+
-```
-
-We've added a TLS layer between the HTTP task and the Socket task - the HTTP task might need to tell the TLS task which certificates to serve, but other than that, it should be able to treat a TLS and Socket identically. On the other side, the MySQL task would perhaps implement the same service as our earlier noddy 'Database' task but internally would contain the logic required to talk to a remote MySQL database via a socket. We're re-using the socket layer to then talk to that MySQL database.
-
-# Final notes
+## Final notes
 
 Grease is currently a proof-of-concept. Basic TCP socket and HTTP functionality has been implemented as greasy tasks, and a couple of examples demonstrate usage of these tasks (or rather, the services they offer). We welcome constructive feedback and suggestions for improvements!
+
+In particular, we await Rust 1.26 and the stablisation of `impl Trait`. The author is hopeful that this will reduce the need to `Box` the ServiceUser and ServiceProvider traits quite so much.
+
+-- Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>
+
+This material is Copyright (C) Cambridge Consultants. This README.md is licensed under [Creative Commons BY-NC-SA 4.0](Attribution-NonCommercial-ShareAlike 4.0 International).

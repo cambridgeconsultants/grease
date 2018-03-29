@@ -1,5 +1,8 @@
 //! # http - An HTTP parsing/rendering task
 //!
+//! Copyright (c) Cambridge Consultants 2018
+//! See the top-level COPYRIGHT file for further information and licensing
+//!
 //! This task implements a basic HTTP parser/renderer. It depends on the
 //! `socket` task to interface with the network, and passes up decoded HTTP
 //! requests. In reply, it receives requests to send the HTTP response.

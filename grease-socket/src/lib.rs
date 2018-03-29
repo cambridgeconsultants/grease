@@ -1,5 +1,8 @@
 //! # socket - A TCP/UDP socket server task
 //!
+//! Copyright (c) Cambridge Consultants 2018
+//! See the top-level COPYRIGHT file for further information and licensing
+//! 
 //! The grease socket task makes handling sockets easier. A user requests the
 //! socket task opens a new socket and it does so (if possible). The user then
 //! receives asynchronous indications when data arrives on the socket and/or
