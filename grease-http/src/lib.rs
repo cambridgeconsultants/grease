@@ -885,420 +885,466 @@ impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
 	}
 }
 
-// #[cfg(test)]
-// mod test {
-// 	use super::*;
-// 	use super::super::ResponseTask;
-// 	use socket;
+#[cfg(test)]
+mod test {
+	use std::net;
+	use std::sync::mpsc;
+	use std::sync::atomic;
+	use super::*;
 
-// 	fn bind_port(
-// 		this_thread: &ServiceUserHandle,
-// 		test_rx: &MessageReceiver,
-// 		http_thread: &ServiceUserHandle,
-// 		addr: &str,
-// 		ctx: Context,
-// 		socket_handle: socket::ListenHandle,
-// 	) -> ServerHandle {
-// 		let addr = addr.parse().unwrap();
-// 		let bind_req = ReqBind {
-// 			addr: addr,
-// 			context: ctx,
-// 		};
-// 		http_thread.send_request(bind_req, &this_thread);
-// 		let cfm = test_rx.recv();
-// 		match cfm {
-// 			::Message::Request(ref reply_to, RequestTask::Socket(socket::Request::Bind(ref x))) => {
-// 				assert_eq!(x.addr, addr);
-// 				let bind_cfm = socket::CfmBind {
-// 					result: Ok(socket_handle),
-// 					context: x.context,
-// 				};
-// 				reply_to.send_nonrequest(bind_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", cfm),
-// 		}
-// 		let cfm = test_rx.recv();
-// 		match cfm {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, ctx);
-// 				if let Ok(h) = x.result {
-// 					h
-// 				} else {
-// 					panic!("HTTP Bind failed");
-// 				}
-// 			}
-// 			_ => panic!("Bad match: {:?}", cfm),
-// 		}
-// 	}
+	use grease::ServiceProvider;
 
-// 	#[test]
-// 	fn bind_port_ok() {
-// 		let (reply_to, test_rx) = ::make_channel();
-// 		// Use ourselves as the 'socket' task
-// 		let http_thread = make_task(&reply_to);
-// 		let _ = bind_port(
-// 			&reply_to,
-// 			&test_rx,
-// 			&http_thread,
-// 			"127.0.1.1:8000",
-// 			Context(1),
-// 			Context(2),
-// 		);
-// 	}
+	enum TestIncoming {
+		HttpCfm(Confirm),
+		HttpInd(Indication),
+		SocketReq(socket::Request, socket::ServiceUserHandle),
+		SocketRsp(socket::Response),
+	}
+	struct TestHandle(mpsc::Sender<TestIncoming>);
 
-// 	#[test]
-// 	fn basic_get_vary_len() {
-// 		let (reply_to, test_rx) = ::make_channel();
-// 		// Use ourselves as the 'socket' task
-// 		let http_thread = make_task(&reply_to);
-// 		let sh = bind_port(
-// 			&reply_to,
-// 			&test_rx,
-// 			&http_thread,
-// 			"127.0.1.1:8001",
-// 			Context(3),
-// 			Context(4),
-// 		);
+	static PORT_NUMBER: atomic::AtomicUsize = atomic::AtomicUsize::new(8000);
 
-// 		// ******************** Connection opens ********************
+	const DEFAULT_TIMEOUT: ::std::time::Duration = ::std::time::Duration::from_secs(5);
 
-// 		let msg = socket::IndConnected {
-// 			listen_handle: Context(4),
-// 			conn_handle: Context(5),
-// 			peer: "127.0.0.1:56789".parse().unwrap(),
-// 		};
-// 		http_thread.send_nonrequest(msg);
+	fn allocate_test_port() -> net::SocketAddr {
+		let port = PORT_NUMBER.fetch_add(1, atomic::Ordering::SeqCst);
+		net::SocketAddr::new(
+			net::IpAddr::V4(net::Ipv4Addr::new(127, 0, 1, 1)),
+			port as u16,
+		)
+	}
 
-// 		// ******************** Request arrives ********************
+	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
+		fn send_confirm(&self, cfm: Confirm) {
+			self.0.send(TestIncoming::HttpCfm(cfm)).unwrap();
+		}
+		fn send_indication(&self, ind: Indication) {
+			self.0.send(TestIncoming::HttpInd(ind)).unwrap();
+		}
+		fn clone(&self) -> ServiceUserHandle {
+			Box::new(TestHandle(self.0.clone()))
+		}
+	}
 
-// 		let msg = socket::IndReceived {
-// 			handle: Context(5),
-// 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
-// 		};
-// 		http_thread.send_nonrequest(msg);
+	impl grease::ServiceProvider<
+		socket::Request,
+		socket::Confirm,
+		socket::Indication,
+		socket::Response,
+	> for TestHandle
+	{
+		fn send_request(
+			&self,
+			req: socket::Request,
+			reply_to: &grease::ServiceUser<socket::Confirm, socket::Indication>,
+		) {
+			self.0
+				.send(TestIncoming::SocketReq(req, reply_to.clone()))
+				.unwrap();
+		}
+		fn send_response(&self, rsp: socket::Response) {
+			self.0.send(TestIncoming::SocketRsp(rsp)).unwrap();
+		}
+		fn clone(&self) -> socket::ServiceProviderHandle {
+			Box::new(TestHandle(self.0.clone()))
+		}
+	}
 
-// 		let msg = test_rx.recv();
-// 		let ch = match msg {
-// 			::Message::Indication(IndicationTask::Http(Indication::RxRequest(ref x))) => {
-// 				assert_eq!(x.server_handle, sh);
-// 				assert_eq!(x.url, "/foo/bar");
-// 				assert_eq!(x.method, Method::GET);
-// 				let mut expected_headers = HeaderMap::new();
-// 				expected_headers.insert("HOST", "localhost".parse().unwrap());
-// 				assert_eq!(x.headers, expected_headers);
-// 				x.connection_handle
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+	fn make_test_channel() -> (TestHandle, mpsc::Receiver<TestIncoming>) {
+		let (test_tx, rx) = mpsc::channel();
+		(TestHandle(test_tx), rx)
+	}
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Response(ResponseTask::Socket(socket::Response::Received(ref x))) => {
-// 				assert_eq!(x.handle, Context(5));
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+	fn bind_port(
+		this_thread: &TestHandle,
+		test_rx: &mpsc::Receiver<TestIncoming>,
+		http_north: &ServiceProviderHandle,
+		addr: &net::SocketAddr,
+		ctx: Context,
+		socket_handle: socket::ListenHandle,
+	) -> (ServerHandle, socket::ServiceUserHandle) {
+		let bind_req = ReqBind {
+			addr: addr.clone(),
+			context: ctx,
+		};
+		http_north.send_request(bind_req.into(), this_thread);
+		let cfm = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		let reply_to_copy: socket::ServiceUserHandle;
+		match cfm {
+			TestIncoming::SocketReq(socket::Request::Bind(ref x), ref reply_to) => {
+				assert_eq!(x.addr, *addr);
+				let bind_cfm = socket::CfmBind {
+					result: Ok(socket_handle),
+					context: x.context,
+				};
+				reply_to.send_confirm(bind_cfm.into());
+				reply_to_copy = (*reply_to).clone();
+			}
+			_ => panic!("Unexpected message."),
+		}
+		let cfm = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match cfm {
+			TestIncoming::HttpCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, ctx);
+				if let Ok(h) = x.result {
+					(h, reply_to_copy.clone())
+				} else {
+					panic!("HTTP Bind failed");
+				}
+			}
+			_ => panic!("Unexpected message"),
+		}
+	}
 
-// 		// ******************** Send the headers ********************
+	#[test]
+	fn bind_port_ok() {
+		let (reply_to, test_rx) = make_test_channel();
+		// Use ourselves as the 'socket' task
+		let http_north = make_task(reply_to.clone());
+		let _ = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_north,
+			&allocate_test_port(),
+			Context::new(1),
+			Context::new(2),
+		);
+	}
 
-// 		let mut msg = ReqResponseStart {
-// 			handle: ch,
-// 			context: Context(1234),
-// 			status: HttpResponseStatus::OK,
-// 			content_type: String::from("text/plain"),
-// 			length: None,
-// 			headers: HeaderMap::new(),
-// 		};
-// 		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
-// 		http_thread.send_request(msg, &reply_to);
+	#[test]
+	fn basic_get_vary_len() {
+		let (reply_to, test_rx) = make_test_channel();
+		// Use ourselves as the 'socket' task
+		let http_north = make_task(reply_to.clone());
+		let (sh, http_south) = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_north,
+			&allocate_test_port(),
+			Context::new(3),
+			Context::new(4),
+		);
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Send(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
-// 				               text/plain\r\nx-magic: frobbins\r\n\r\n"
-// 					.as_bytes();
-// 				assert_eq!(x.data, headers);
-// 				let send_cfm = socket::CfmSend {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(x.data.len()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		// ******************** Connection opens ********************
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::ResponseStart(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 				assert_eq!(x.context, Context(1234));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = socket::IndConnected {
+			listen_handle: Context::new(4),
+			conn_handle: Context::new(5),
+			peer: "127.0.0.1:56789".parse().unwrap(),
+		};
+		http_south.send_indication(msg.into());
 
-// 		// ******************** Send the body ********************
+		// ******************** Request arrives ********************
 
-// 		let test_body = Vec::from("One two, Rust on my shoe");
-// 		let msg = ReqResponseBody {
-// 			handle: ch,
-// 			context: Context(5678),
-// 			data: test_body.clone(),
-// 		};
-// 		http_thread.send_request(msg, &reply_to);
+		let msg = socket::IndReceived {
+			handle: Context::new(5),
+			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
+		};
+		http_south.send_indication(msg.into());
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Send(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				assert_eq!(x.data, test_body);
-// 				let send_cfm = socket::CfmSend {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(x.data.len()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		let ch = match msg {
+			TestIncoming::HttpInd(Indication::RxRequest(ref x)) => {
+				assert_eq!(x.server_handle, sh);
+				assert_eq!(x.url, "/foo/bar");
+				assert_eq!(x.method, Method::GET);
+				let mut expected_headers = HeaderMap::new();
+				expected_headers.insert("HOST", "localhost".parse().unwrap());
+				assert_eq!(x.headers, expected_headers);
+				x.connection_handle
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::ResponseBody(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 				assert_eq!(x.context, Context(5678));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketRsp(socket::Response::Received(ref x)) => {
+				assert_eq!(x.handle, Context::new(5));
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** Send an empty body ********************
+		// ******************** Send the headers ********************
 
-// 		let msg = ReqResponseBody {
-// 			handle: ch,
-// 			context: Context(5678),
-// 			data: Vec::new(),
-// 		};
-// 		http_thread.send_request(msg, &reply_to);
+		let mut msg = ReqResponseStart {
+			handle: ch,
+			context: Context::new(1234),
+			status: HttpResponseStatus::OK,
+			content_type: String::from("text/plain"),
+			length: None,
+			headers: HeaderMap::new(),
+		};
+		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
+		http_north.send_request(msg.into(), &reply_to);
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Close(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				let send_cfm = socket::CfmClose {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Send(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Type: \
+				               text/plain\r\nx-magic: frobbins\r\n\r\n"
+					.as_bytes();
+				assert_eq!(x.data, headers);
+				let send_cfm = socket::CfmSend {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(x.data.len()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::ResponseBody(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 				assert_eq!(x.context, Context(5678));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpCfm(Confirm::ResponseStart(ref x)) => {
+				assert_eq!(x.handle, ch);
+				assert_eq!(x.context, Context::new(1234));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** Get a close indication ********************
+		// ******************** Send the body ********************
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Indication(IndicationTask::Http(Indication::Closed(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let test_body = Vec::from("One two, Rust on my shoe");
+		let msg = ReqResponseBody {
+			handle: ch,
+			context: Context::new(5678),
+			data: test_body.clone(),
+		};
+		http_north.send_request(msg.into(), &reply_to);
 
-// 		// ******************** All done ********************
-// 	}
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Send(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				assert_eq!(x.data, test_body);
+				let send_cfm = socket::CfmSend {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(x.data.len()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 	#[test]
-// 	fn basic_get_fixed_len() {
-// 		let (reply_to, test_rx) = ::make_channel();
-// 		// Use ourselves as the 'socket' task
-// 		let http_thread = make_task(&reply_to);
-// 		let sh = bind_port(
-// 			&reply_to,
-// 			&test_rx,
-// 			&http_thread,
-// 			"127.0.1.1:8001",
-// 			Context(3),
-// 			Context(4),
-// 		);
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpCfm(Confirm::ResponseBody(ref x)) => {
+				assert_eq!(x.handle, ch);
+				assert_eq!(x.context, Context::new(5678));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** Connection opens ********************
+		// ******************** Send an empty body ********************
 
-// 		let msg = socket::IndConnected {
-// 			listen_handle: Context(4),
-// 			conn_handle: Context(5),
-// 			peer: "127.0.0.1:56789".parse().unwrap(),
-// 		};
-// 		http_thread.send_nonrequest(msg);
+		let msg = ReqResponseBody {
+			handle: ch,
+			context: Context::new(5678),
+			data: Vec::new(),
+		};
+		http_north.send_request(msg.into(), &reply_to);
 
-// 		// ******************** Request arrives ********************
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Close(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				let send_cfm = socket::CfmClose {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = socket::IndReceived {
-// 			handle: Context(5),
-// 			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
-// 		};
-// 		http_thread.send_nonrequest(msg);
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpCfm(Confirm::ResponseBody(ref x)) => {
+				assert_eq!(x.handle, ch);
+				assert_eq!(x.context, Context::new(5678));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = test_rx.recv();
-// 		let ch = match msg {
-// 			::Message::Indication(IndicationTask::Http(Indication::RxRequest(ref x))) => {
-// 				assert_eq!(x.server_handle, sh);
-// 				assert_eq!(x.url, "/foo/bar");
-// 				assert_eq!(x.method, Method::GET);
-// 				let mut expected_headers = HeaderMap::new();
-// 				expected_headers.insert("Host", "localhost".parse().unwrap());
-// 				assert_eq!(x.headers, expected_headers);
-// 				x.connection_handle
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		// ******************** Get a close indication ********************
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Response(ResponseTask::Socket(socket::Response::Received(ref x))) => {
-// 				assert_eq!(x.handle, Context(5));
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpInd(Indication::Closed(ref x)) => {
+				assert_eq!(x.handle, ch);
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** Send the headers ********************
+		// ******************** All done ********************
+	}
 
-// 		let mut msg = ReqResponseStart {
-// 			handle: ch,
-// 			context: Context(1234),
-// 			status: HttpResponseStatus::OK,
-// 			content_type: String::from("text/plain"),
-// 			length: Some(24),
-// 			headers: HeaderMap::new(),
-// 		};
-// 		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
-// 		http_thread.send_request(msg, &reply_to);
+	#[test]
+	fn basic_get_fixed_len() {
+		let (reply_to, test_rx) = make_test_channel();
+		// Use ourselves as the 'socket' task
+		let http_north = make_task(reply_to.clone());
+		let (sh, http_south) = bind_port(
+			&reply_to,
+			&test_rx,
+			&http_north,
+			&allocate_test_port(),
+			Context::new(3),
+			Context::new(4),
+		);
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Send(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
-// 				               24\r\nContent-Type: text/plain\r\nx-magic: frobbins\r\n\r\n"
-// 					.as_bytes();
-// 				println!("Headers: {:?}", String::from_utf8(x.data.clone()));
-// 				assert_eq!(x.data, headers);
-// 				let send_cfm = socket::CfmSend {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(x.data.len()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		// ******************** Connection opens ********************
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::ResponseStart(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 				assert_eq!(x.context, Context(1234));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = socket::IndConnected {
+			listen_handle: Context::new(4),
+			conn_handle: Context::new(5),
+			peer: "127.0.0.1:56789".parse().unwrap(),
+		};
+		http_south.send_indication(msg.into());
 
-// 		// ******************** Send the body ********************
+		// ******************** Request arrives ********************
 
-// 		let test_body = Vec::from("One two, Rust on my shoe");
-// 		let msg = ReqResponseBody {
-// 			handle: ch,
-// 			context: Context(5678),
-// 			data: test_body.clone(),
-// 		};
-// 		http_thread.send_request(msg, &reply_to);
+		let msg = socket::IndReceived {
+			handle: Context::new(5),
+			data: String::from("GET /foo/bar HTTP/1.1\r\nHost: localhost\r\n\r\n").into_bytes(),
+		};
+		http_south.send_indication(msg.into());
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Send(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				assert_eq!(x.data, test_body);
-// 				let send_cfm = socket::CfmSend {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(x.data.len()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		let ch = match msg {
+			TestIncoming::HttpInd(Indication::RxRequest(ref x)) => {
+				assert_eq!(x.server_handle, sh);
+				assert_eq!(x.url, "/foo/bar");
+				assert_eq!(x.method, Method::GET);
+				let mut expected_headers = HeaderMap::new();
+				expected_headers.insert("Host", "localhost".parse().unwrap());
+				assert_eq!(x.headers, expected_headers);
+				x.connection_handle
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Confirm(ConfirmTask::Http(Confirm::ResponseBody(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 				assert_eq!(x.context, Context(5678));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketRsp(socket::Response::Received(ref x)) => {
+				assert_eq!(x.handle, Context::new(5));
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** Auto close ********************
+		// ******************** Send the headers ********************
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Request(
-// 				ref msg_reply_to,
-// 				RequestTask::Socket(socket::Request::Close(ref x)),
-// 			) => {
-// 				assert_eq!(x.handle, Context(5));
-// 				let send_cfm = socket::CfmClose {
-// 					handle: x.handle,
-// 					context: x.context,
-// 					result: Ok(()),
-// 				};
-// 				msg_reply_to.send_nonrequest(send_cfm);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let mut msg = ReqResponseStart {
+			handle: ch,
+			context: Context::new(1234),
+			status: HttpResponseStatus::OK,
+			content_type: String::from("text/plain"),
+			length: Some(24),
+			headers: HeaderMap::new(),
+		};
+		msg.headers.insert("x-magic", "frobbins".parse().unwrap());
+		http_north.send_request(msg.into(), &reply_to);
 
-// 		// ******************** Get a close indication ********************
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Send(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				let headers = "HTTP/1.1 200 OK\r\nServer: grease/http\r\nContent-Length: \
+				               24\r\nContent-Type: text/plain\r\nx-magic: frobbins\r\n\r\n"
+					.as_bytes();
+				println!("Headers: {:?}", String::from_utf8(x.data.clone()));
+				assert_eq!(x.data, headers);
+				let send_cfm = socket::CfmSend {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(x.data.len()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		let msg = test_rx.recv();
-// 		match msg {
-// 			::Message::Indication(IndicationTask::Http(Indication::Closed(ref x))) => {
-// 				assert_eq!(x.handle, ch);
-// 			}
-// 			_ => panic!("Bad match: {:?}", msg),
-// 		};
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpCfm(Confirm::ResponseStart(ref x)) => {
+				assert_eq!(x.handle, ch);
+				assert_eq!(x.context, Context::new(1234));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Unexpected message"),
+		};
 
-// 		// ******************** All done ********************
-// 	}
+		// ******************** Send the body ********************
 
-// }
+		let test_body = Vec::from("One two, Rust on my shoe");
+		let msg = ReqResponseBody {
+			handle: ch,
+			context: Context::new(5678),
+			data: test_body.clone(),
+		};
+		http_north.send_request(msg.into(), &reply_to);
+
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Send(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				assert_eq!(x.data, test_body);
+				let send_cfm = socket::CfmSend {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(x.data.len()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
+
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpCfm(Confirm::ResponseBody(ref x)) => {
+				assert_eq!(x.handle, ch);
+				assert_eq!(x.context, Context::new(5678));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Unexpected message"),
+		};
+
+		// ******************** Auto close ********************
+
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::SocketReq(socket::Request::Close(ref x), ref msg_reply_to) => {
+				assert_eq!(x.handle, Context::new(5));
+				let send_cfm = socket::CfmClose {
+					handle: x.handle,
+					context: x.context,
+					result: Ok(()),
+				};
+				msg_reply_to.send_confirm(send_cfm.into());
+			}
+			_ => panic!("Unexpected message"),
+		};
+
+		// ******************** Get a close indication ********************
+
+		let msg = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
+		match msg {
+			TestIncoming::HttpInd(Indication::Closed(ref x)) => {
+				assert_eq!(x.handle, ch);
+			}
+			_ => panic!("Unexpected message"),
+		};
+
+		// ******************** All done ********************
+	}
+}
 
 // ****************************************************************************
 //
