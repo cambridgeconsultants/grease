@@ -238,8 +238,8 @@ pub enum SocketError {
 pub enum ConnectionType {
 	/// Stream, aka a TCP connection
 	Stream,
-	/// Datagram, aka a UDP connection
-	Datagram,
+	// /// Datagram, aka a UDP connection
+	// Datagram, not yet supported
 }
 
 // ****************************************************************************
@@ -577,7 +577,6 @@ impl TaskContext {
 		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
 		match req_bind.conn_type {
 			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
-			ConnectionType::Datagram => panic!("Datagrams not supported yet"),
 		}
 	}
 
@@ -761,123 +760,158 @@ impl Drop for ConnectedSocket {
 	}
 }
 
-// #[cfg(test)]
-// mod test {
-// 	use std::io::prelude::*;
-// 	use std::net;
-// 	use rand;
-// 	use rand::Rng;
-// 	use env_logger;
-// 	use super::*;
+#[cfg(test)]
+mod test {
+	use std::io::prelude::*;
+	use std::net;
+	use std::sync::mpsc;
+	use super::*;
 
-// 	#[test]
-// 	/// Binds 127.0.1.1:8000
-// 	fn bind_port_ok() {
-// 		let socket_thread = make_task();
-// 		let (reply_to, test_rx) = mpsc::channel();
-// 		let bind_req = ReqBind {
-// 			addr: "127.0.1.1:8000".parse().unwrap(),
-// 			context: Context(1234),
-// 			conn_type: ConnectionType::Stream,
-// 		};
-// 		socket_thread.send_request(bind_req, &reply_to);
-// 		let cfm = test_rx.recv();
-// 		match cfm {
-// 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(1234));
-// 				assert!(x.result.is_ok());
-// 			}
-// 			_ => panic!("Bad match"),
-// 		}
-// 	}
+	enum TestIncoming {
+		SocketCfm(Confirm),
+		SocketInd(Indication)
+	}
+	struct TestHandle(mpsc::Sender<TestIncoming>);
 
-// 	#[test]
-// 	/// Fails to bind 127.0.1.1:22 (because you need to be root)
-// 	fn bind_port_fail() {
-// 		let socket_thread = make_task();
-// 		let (reply_to, test_rx) = ::make_channel();
-// 		// Shouldn't be able to bind :22 as normal user
-// 		let bind_req = ReqBind {
-// 			addr: "127.0.1.1:22".parse().unwrap(),
-// 			context: Context(5678),
-// 			conn_type: ConnectionType::Stream,
-// 		};
-// 		socket_thread.send_request(bind_req, &reply_to);
-// 		let cfm = test_rx.recv();
-// 		match cfm {
-// 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
-// 				assert!(x.result.is_err());
-// 			}
-// 			_ => panic!("Bad match"),
-// 		}
-// 	}
+	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
+		fn send_confirm(&self, cfm: Confirm) {
+			self.0.send(TestIncoming::SocketCfm(cfm)).unwrap();
+		}
+		fn send_indication(&self, ind: Indication) {
+			self.0.send(TestIncoming::SocketInd(ind)).unwrap();
+		}
+		fn clone(&self) -> ServiceUserHandle {
+			Box::new(TestHandle(self.0.clone()))
+		}
+	}
 
-// 	#[test]
-// 	/// Fails to bind 8.8.8.8:8000 (because you don't have that i/f)
-// 	fn bind_if_fail() {
-// 		let socket_thread = make_task();
-// 		let (reply_to, test_rx) = ::make_channel();
-// 		// Shouldn't be able to bind :22 as normal user
-// 		let bind_req = ReqBind {
-// 			addr: "8.8.8.8:8000".parse().unwrap(),
-// 			context: Context(6666),
-// 			conn_type: ConnectionType::Stream,
-// 		};
-// 		socket_thread.send_request(bind_req, &reply_to);
-// 		let cfm = test_rx.recv();
-// 		match cfm {
-// 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(6666));
-// 				assert!(x.result.is_err());
-// 			}
-// 			_ => panic!("Bad match"),
-// 		}
-// 	}
+	fn new_channel() -> (TestHandle, mpsc::Receiver<TestIncoming>) {
+		let (test_tx, test_rx) = mpsc::channel();
+		(TestHandle(test_tx), test_rx)
+	}
 
-// 	#[test]
-// 	/// Connects to a socket on 127.0.1.1:8001
-// 	fn connect() {
-// 		let socket_thread = make_task();
-// 		let (reply_to, test_rx) = ::make_channel();
+	/// Binds 127.0.1.1:8000
+	#[test]
+	fn bind_port_ok() {
+		let socket_thread = make_task();
+		let (handle, rx) = new_channel();
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8000".parse().unwrap(),
+			context: Context::new(1234),
+			conn_type: ConnectionType::Stream,
+		};
+		socket_thread.send_request(bind_req.into(), &handle);
+		let cfm = rx.recv().unwrap();
+		match cfm {
+			TestIncoming::SocketCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, Context::new(1234));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Bad match"),
+		}
+	}
 
-// 		let bind_req = ReqBind {
-// 			addr: "127.0.1.1:8001".parse().unwrap(),
-// 			context: Context(5678),
-// 			conn_type: ConnectionType::Stream,
-// 		};
-// 		socket_thread.send_request(bind_req, &reply_to);
-// 		let listen_handle = match test_rx.recv() {
-// 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
-// 				x.result.unwrap()
-// 			}
-// 			_ => panic!("Bad match"),
-// 		};
+	#[test]
+	/// Fails to bind 127.0.1.1:8001 twice
+	fn bind_port_fail() {
+		let port = "127.0.1.1:8001";
+		let socket_thread = make_task();
+		let (handle, rx) = new_channel();
+		let bind_req = ReqBind {
+			addr: port.parse().unwrap(),
+			context: Context::new(1234),
+			conn_type: ConnectionType::Stream,
+		};
+		socket_thread.send_request(bind_req.into(), &handle);
+		let cfm = rx.recv().unwrap();
+		match cfm {
+			TestIncoming::SocketCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, Context::new(1234));
+				assert!(x.result.is_ok());
+			}
+			_ => panic!("Bad match"),
+		}
+		// Can't bind same socket twice
+		let bind_req = ReqBind {
+			addr: port.parse().unwrap(),
+			context: Context::new(5678),
+			conn_type: ConnectionType::Stream,
+		};
+		socket_thread.send_request(bind_req.into(), &handle);
+		let cfm = rx.recv().unwrap();
+		match cfm {
+			TestIncoming::SocketCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, Context::new(5678));
+				assert!(x.result.is_err());
+			}
+			_ => panic!("Bad match"),
+		}
+	}
 
-// 		// Make a TCP connection
-// 		let stream = net::TcpStream::connect("127.0.1.1:8001").unwrap();
+	#[test]
+	/// Fails to bind 8.8.8.8:8000 (because you don't have that i/f)
+	fn bind_if_fail() {
+		let socket_thread = make_task();
+		let (handle, rx) = new_channel();
+		let bind_req = ReqBind {
+			addr: "8.8.8.8:8000".parse().unwrap(),
+			context: Context::new(6666),
+			conn_type: ConnectionType::Stream,
+		};
+		socket_thread.send_request(bind_req.into(), &handle);
+		let cfm = rx.recv().unwrap();
+		match cfm {
+			TestIncoming::SocketCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, Context::new(6666));
+				assert!(x.result.is_err());
+			}
+			_ => panic!("Bad match"),
+		}
+	}
 
-// 		// Check we get an IndConnected
-// 		let conn_handle = match test_rx.recv() {
-// 			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
-// 				assert_eq!(x.listen_handle, listen_handle);
-// 				assert_eq!(x.peer, stream.local_addr().unwrap());
-// 				x.conn_handle
-// 			}
-// 			_ => panic!("Bad match"),
-// 		};
+	#[test]
+	/// Connects to a socket on 127.0.1.1:8002
+	fn connect() {
+		let socket_thread = make_task();
+		let (handle, rx) = new_channel();
 
-// 		stream.shutdown(net::Shutdown::Both).unwrap();
+		let bind_req = ReqBind {
+			addr: "127.0.1.1:8002".parse().unwrap(),
+			context: Context::new(5678),
+			conn_type: ConnectionType::Stream,
+		};
+		socket_thread.send_request(bind_req.into(), &handle);
+		let listen_handle = match rx.recv().unwrap() {
+			TestIncoming::SocketCfm(Confirm::Bind(ref x)) => {
+				assert_eq!(x.context, Context::new(5678));
+				x.result.unwrap()
+			}
+			_ => panic!("Bad match"),
+		};
 
-// 		// Check we get an IndDropped
-// 		match test_rx.recv() {
-// 			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
-// 				assert_eq!(x.handle, conn_handle);
-// 			}
-// 			_ => panic!("Bad match"),
-// 		};
-// 	}
+		// Make a TCP connection
+		let stream = net::TcpStream::connect("127.0.1.1:8002").unwrap();
+
+		// Check we get an IndConnected
+		let conn_handle = match rx.recv().unwrap() {
+			TestIncoming::SocketInd(Indication::Connected(ref x)) => {
+				assert_eq!(x.listen_handle, listen_handle);
+				assert_eq!(x.peer, stream.local_addr().unwrap());
+				x.conn_handle
+			}
+			_ => panic!("Bad match"),
+		};
+
+		stream.shutdown(net::Shutdown::Both).unwrap();
+
+		// Check we get an IndDropped
+		match rx.recv().unwrap() {
+			TestIncoming::SocketInd(Indication::Dropped(ref x)) => {
+				assert_eq!(x.handle, conn_handle);
+			}
+			_ => panic!("Bad match"),
+		};
+	}
 
 // 	#[test]
 // 	/// Uses 127.0.1.1:8002 and 127.0.1.1:8003 to send random data
@@ -887,13 +921,13 @@ impl Drop for ConnectedSocket {
 
 // 		let bind_req = ReqBind {
 // 			addr: "127.0.1.1:8002".parse().unwrap(),
-// 			context: Context(5678),
+// 			context: Context::new(5678),
 // 			conn_type: ConnectionType::Stream,
 // 		};
 // 		socket_thread.send_request(bind_req, &reply_to);
-// 		let listen_handle8002 = match test_rx.recv() {
+// 		let listen_handle8002 = match rx.recv().unwrap() {
 // 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
+// 				assert_eq!(x.context, Context::new(5678));
 // 				x.result.unwrap()
 // 			}
 // 			_ => panic!("Bad match"),
@@ -901,13 +935,13 @@ impl Drop for ConnectedSocket {
 
 // 		let bind_req = ReqBind {
 // 			addr: "127.0.1.1:8003".parse().unwrap(),
-// 			context: Context(5678),
+// 			context: Context::new(5678),
 // 			conn_type: ConnectionType::Stream,
 // 		};
 // 		socket_thread.send_request(bind_req, &reply_to);
-// 		let listen_handle8003 = match test_rx.recv() {
+// 		let listen_handle8003 = match rx.recv().unwrap() {
 // 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
+// 				assert_eq!(x.context, Context::new(5678));
 // 				x.result.unwrap()
 // 			}
 // 			_ => panic!("Bad match"),
@@ -918,7 +952,7 @@ impl Drop for ConnectedSocket {
 // 		let stream8002 = net::TcpStream::connect("127.0.1.1:8002").unwrap();
 
 // 		// Check we get an IndConnected, twice
-// 		let conn_handle8003 = match test_rx.recv() {
+// 		let conn_handle8003 = match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 // 				assert_eq!(x.listen_handle, listen_handle8003);
 // 				assert_eq!(x.peer, stream8003.local_addr().unwrap());
@@ -926,7 +960,7 @@ impl Drop for ConnectedSocket {
 // 			}
 // 			_ => panic!("Bad match"),
 // 		};
-// 		let conn_handle8002 = match test_rx.recv() {
+// 		let conn_handle8002 = match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 // 				assert_eq!(x.listen_handle, listen_handle8002);
 // 				assert_eq!(x.peer, stream8002.local_addr().unwrap());
@@ -939,7 +973,7 @@ impl Drop for ConnectedSocket {
 // 		stream8002.shutdown(net::Shutdown::Both).unwrap();
 
 // 		// Check we get an IndDropped
-// 		match test_rx.recv() {
+// 		match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 // 				assert_eq!(x.handle, conn_handle8002);
 // 			}
@@ -950,7 +984,7 @@ impl Drop for ConnectedSocket {
 // 		stream8003.shutdown(net::Shutdown::Both).unwrap();
 
 // 		// Check we get an IndDropped
-// 		match test_rx.recv() {
+// 		match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 // 				assert_eq!(x.handle, conn_handle8003);
 // 			}
@@ -974,13 +1008,13 @@ impl Drop for ConnectedSocket {
 
 // 		let bind_req = ReqBind {
 // 			addr: "127.0.1.1:8004".parse().unwrap(),
-// 			context: Context(5678),
+// 			context: Context::new(5678),
 // 			conn_type: ConnectionType::Stream,
 // 		};
 // 		socket_thread.send_request(bind_req, &reply_to);
-// 		let listen_handle = match test_rx.recv() {
+// 		let listen_handle = match rx.recv().unwrap() {
 // 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
+// 				assert_eq!(x.context, Context::new(5678));
 // 				x.result.unwrap()
 // 			}
 // 			_ => panic!("Bad match"),
@@ -990,7 +1024,7 @@ impl Drop for ConnectedSocket {
 // 		let mut stream = net::TcpStream::connect("127.0.1.1:8004").unwrap();
 
 // 		// Check we get an IndConnected
-// 		let conn_handle = match test_rx.recv() {
+// 		let conn_handle = match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 // 				assert_eq!(x.listen_handle, listen_handle);
 // 				assert_eq!(x.peer, stream.local_addr().unwrap());
@@ -1009,7 +1043,7 @@ impl Drop for ConnectedSocket {
 
 // 		// Check we get data, in pieces of arbitrary length
 // 		while rx_data.len() < data.len() {
-// 			match test_rx.recv() {
+// 			match rx.recv().unwrap() {
 // 				Message::Indication(IndicationTask::Socket(Indication::Received(ref x))) => {
 // 					assert_eq!(x.handle, conn_handle);
 // 					rx_data.append(&mut x.data.clone());
@@ -1026,7 +1060,7 @@ impl Drop for ConnectedSocket {
 // 		drop(stream);
 
 // 		// Check we get an IndDropped
-// 		match test_rx.recv() {
+// 		match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 // 				assert_eq!(x.handle, conn_handle);
 // 			}
@@ -1042,13 +1076,13 @@ impl Drop for ConnectedSocket {
 
 // 		let bind_req = ReqBind {
 // 			addr: "127.0.1.1:8005".parse().unwrap(),
-// 			context: Context(5678),
+// 			context: Context::new(5678),
 // 			conn_type: ConnectionType::Stream,
 // 		};
 // 		socket_thread.send_request(bind_req, &reply_to);
-// 		let listen_handle = match test_rx.recv() {
+// 		let listen_handle = match rx.recv().unwrap() {
 // 			Message::Confirm(ConfirmTask::Socket(Confirm::Bind(ref x))) => {
-// 				assert_eq!(x.context, Context(5678));
+// 				assert_eq!(x.context, Context::new(5678));
 // 				x.result.unwrap()
 // 			}
 // 			_ => panic!("Bad match"),
@@ -1058,7 +1092,7 @@ impl Drop for ConnectedSocket {
 // 		let mut stream = net::TcpStream::connect("127.0.1.1:8005").unwrap();
 
 // 		// Check we get an IndConnected
-// 		let conn_handle = match test_rx.recv() {
+// 		let conn_handle = match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Connected(ref x))) => {
 // 				assert_eq!(x.listen_handle, listen_handle);
 // 				assert_eq!(x.peer, stream.local_addr().unwrap());
@@ -1077,7 +1111,7 @@ impl Drop for ConnectedSocket {
 // 		socket_thread.send_request(
 // 			ReqSend {
 // 				handle: conn_handle,
-// 				context: Context(1234),
+// 				context: Context::new(1234),
 // 				data: data.clone(),
 // 			},
 // 			&reply_to,
@@ -1100,7 +1134,7 @@ impl Drop for ConnectedSocket {
 // 		assert_eq!(rx_data, data);
 
 // 		// Check we get cfm
-// 		match test_rx.recv() {
+// 		match rx.recv().unwrap() {
 // 			Message::Confirm(ConfirmTask::Socket(Confirm::Send(ref x))) => {
 // 				assert_eq!(x.handle, conn_handle);
 // 				if let Ok(len) = x.result {
@@ -1108,7 +1142,7 @@ impl Drop for ConnectedSocket {
 // 				} else {
 // 					panic!("Didn't get OK in CfmSend");
 // 				}
-// 				assert_eq!(x.context, Context(1234));
+// 				assert_eq!(x.context, Context::new(1234));
 // 			}
 // 			_ => panic!("Bad match"),
 // 		};
@@ -1116,7 +1150,7 @@ impl Drop for ConnectedSocket {
 // 		stream.shutdown(net::Shutdown::Both).unwrap();
 
 // 		// Check we get an IndDropped
-// 		match test_rx.recv() {
+// 		match rx.recv().unwrap() {
 // 			Message::Indication(IndicationTask::Socket(Indication::Dropped(ref x))) => {
 // 				assert_eq!(x.handle, conn_handle);
 // 			}
@@ -1125,7 +1159,7 @@ impl Drop for ConnectedSocket {
 
 // 		test_rx.check_empty();
 // 	}
-// }
+}
 
 /// Don't log the contents of the vector
 impl fmt::Debug for IndReceived {
