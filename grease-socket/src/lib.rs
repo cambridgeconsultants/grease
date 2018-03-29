@@ -763,6 +763,37 @@ impl Drop for ConnectedSocket {
 	}
 }
 
+/// Don't log the contents of the vector
+impl fmt::Debug for IndReceived {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"IndReceived {{ handle: {}, data.len: {} }}",
+			self.handle,
+			self.data.len()
+		)
+	}
+}
+
+/// Don't log the contents of the vector
+impl fmt::Debug for ReqSend {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			"ReqSend {{ handle: {}, data.len: {} }}",
+			self.handle,
+			self.data.len()
+		)
+	}
+}
+
+/// Wrap io::Errors into SocketErrors easily
+impl From<io::Error> for SocketError {
+	fn from(e: io::Error) -> SocketError {
+		SocketError::IOError(e.kind())
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use std::io::prelude::*;
@@ -774,7 +805,7 @@ mod test {
 
 	enum TestIncoming {
 		SocketCfm(Confirm),
-		SocketInd(Indication)
+		SocketInd(Indication),
 	}
 	struct TestHandle(mpsc::Sender<TestIncoming>);
 
@@ -784,7 +815,10 @@ mod test {
 
 	fn allocate_test_port() -> net::SocketAddr {
 		let port = PORT_NUMBER.fetch_add(1, atomic::Ordering::SeqCst);
-		net::SocketAddr::new(net::IpAddr::V4(net::Ipv4Addr::new(127, 0, 1, 1)), port as u16)
+		net::SocketAddr::new(
+			net::IpAddr::V4(net::Ipv4Addr::new(127, 0, 1, 1)),
+			port as u16,
+		)
 	}
 
 	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
@@ -1174,37 +1208,6 @@ mod test {
 		};
 
 		// rx.check_empty();
-	}
-}
-
-/// Don't log the contents of the vector
-impl fmt::Debug for IndReceived {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"IndReceived {{ handle: {}, data.len: {} }}",
-			self.handle,
-			self.data.len()
-		)
-	}
-}
-
-/// Don't log the contents of the vector
-impl fmt::Debug for ReqSend {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"ReqSend {{ handle: {}, data.len: {} }}",
-			self.handle,
-			self.data.len()
-		)
-	}
-}
-
-/// Wrap io::Errors into SocketErrors easily
-impl From<io::Error> for SocketError {
-	fn from(e: io::Error) -> SocketError {
-		SocketError::IOError(e.kind())
 	}
 }
 
