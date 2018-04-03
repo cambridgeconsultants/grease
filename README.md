@@ -194,64 +194,106 @@ The best way to get a feel for how this fits together, is to look at one of the 
 Internally, Tasks are functions which iterate over their internal channel and then call an appropriate handler function based on the message received. For example:
 
 ```rust
-struct TaskContext { ... };
+mod foo {
+  use std::sync::mpsc;
+  use grease;
 
-struct Handle {
-    chan: std::sync::mpsc::Sender;
+  pub enum Request { ... }
+
+  pub enum Confirm { ... }
+
+  pub enum Indication { ... }
+
+  pub enum Response { ... }
+
+  struct TaskContext { ... };
+
+  struct Handle {
+      chan: mpsc::Sender;
+  }
+
+  enum Incoming {
+      FooInd(foo::Indication),
+      FooCfm(foo::Confirm),
+      OurRequest(Request, grease::ServiceUserHandle),
+      OurResponse(Response)
+  }
+
+  /// Stuff their confirms/inds into our channel
+  impl grease::ServiceUser<foo::Confirm, foo::Indication> for Handle {
+      fn send_confirm(&self, cfm: foo::Confirm) {
+          self.chan.send(Incoming::FooCfm(cfm)).unwrap();
+      }
+
+      fn send_indication(&self, ind: foo::Indication) {
+          self.chan.send(Incoming::FooInd(ind)).unwrap();
+      }
+
+      fn clone(&self) -> foo::ServiceUserHandle {
+         Box::new(Handle {
+            chan: self.chan.clone(),
+         })
+      }
+  }
+
+  /// Stuff our requests/responses into our channel
+  impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
+      fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+          self.chan
+              .send(Incoming::OurRequest(req, reply_to.clone()))
+              .unwrap();
+      }
+
+      fn send_response(&self, rsp: Response) {
+          self.chan.send(Incoming::OurResponse(rsp)).unwrap();
+      }
+
+      fn clone(&self) -> ServiceProviderHandle {
+          Box::new(Handle {
+              chan: self.chan.clone(),
+          })
+      }
+  }
+
+  pub fn make_task(foo_handle: foo::ServiceProviderHandle) -> ServiceProviderHandle {
+      let (tx, rx) = mpsc::channel();
+      let our_handle = Handle { chan: tx.clone() };
+      std::thread::spawn(move || {
+          let mut t = TaskContext::new(foo_handle, our_handle);
+          for msg in rx.iter() {
+              t.handle(msg);
+          }
+          panic!("This task should never die!");
+      });
+      Box::new(Handle { chan: tx })
+  }
+
+  impl TaskContext {
+      fn new(foo_handle: foo::ServiceProviderHandle, our_handle: Handle) -> TaskContext {
+          ...
+      }
+
+      fn handle(&mut self, msg: Incoming) {
+          match msg {
+              // This is one of our requests
+              Incoming::OurRequest(req, reply_to) => {
+                  self.handle_req(req, reply_to)
+              }
+              // We use the Foo service so we expect to get confirmations and indications from it
+              Incoming::FooCfm(x) => {
+                  self.handle_lower_cfm(x),
+              }
+              Incoming::FooInd(x) => {
+                  self.handle_lower_ind(x),
+              }
+          }
+      }
+  }
 }
 
-enum Incoming {
-    FooInd(foo::Indication),
-    FooCfm(foo::Confirm),
-    OurRequest(Request, ServiceUserHandle),
-    OurResponse(Response)
-}
-
-/// Stuff their confirms/inds into the channel
-impl foo::ServiceProviderUser for Handle {
-    ...
-}
-
-/// Stuff our requests/responses into the channel
-impl ServiceProviderUser for Handle {
-    ...
-}
-
-pub fn make_task(foo_handle: foo::ServiceProviderHandle) -> ServiceProviderHandle {
-    let (tx, rx) = mpsc::channel();
-    let our_handle = Handle { chan: tx.clone() };
-    std::thread::spawn(move || {
-        let mut t = TaskContext::new(foo_handle, our_handle);
-        for msg in rx.iter() {
-            t.handle(msg);
-        }
-        panic!("This task should never die!");
-    });
-    Box::new(Handle { chan: tx })
-}
-
-impl TaskContext {
-    fn new(foo_handle: foo::ServiceProviderHandle, our_handle: Handle) -> TaskContext {
-        ...
-    }
-
-    fn handle(&mut self, msg: Incoming) {
-        match msg {
-            // This is one of our requests
-            Incoming::OurRequest(req, reply_to) => {
-                self.handle_req(req, reply_to)
-            }
-            // We use the bar service so we expect to get confirmations and indications from it
-            Incoming::FooCfm(x) => {
-                self.handle_lower_cfm(x),
-            }
-            Incoming::FooInd(x) => {
-                self.handle_lower_ind(x),
-            }
-        }
-    }
-}
 ```
+
+See the `grease-socket` and `grease-http` tasks for a fully working task implementation, or see the `examples` folder for some top-level App tasks which use `grease-http` and `grease-socket`.
 
 ## Logging
 
@@ -268,10 +310,10 @@ Note - we suggest messages are logged by the receiver, rather than the sender, w
 
 ## Final notes
 
-Grease is currently a proof-of-concept. Basic TCP socket and HTTP functionality has been implemented as greasy tasks, and a couple of examples demonstrate usage of these tasks (or rather, the services they offer). We welcome constructive feedback and suggestions for improvements!
+Grease is currently a proof-of-concept. Basic TCP socket and HTTP functionality has been implemented as greasy tasks, and a couple of examples demonstrate usage of these tasks (or rather, the services they offer). We welcome constructive feedback and suggestions for improvements! You can also talk to us about how this design approach can help your project.
 
 In particular, we await Rust 1.26 and the stablisation of `impl Trait`. The author is hopeful that this will reduce the need to `Box` the ServiceUser and ServiceProvider traits quite so much.
 
 -- Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>
 
-This material is Copyright (C) Cambridge Consultants. This README.md is licensed under [Creative Commons BY-NC-SA 4.0](Attribution-NonCommercial-ShareAlike 4.0 International).
+This repository is Copyright (C) Cambridge Consultants 2018, and available under either the MIT and Apache-2.0 licences. Please see the <COPYRIGHT> file. This README.md is licensed under [Creative Commons BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
