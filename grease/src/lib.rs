@@ -194,11 +194,11 @@ macro_rules! service_map {
 		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 
 		enum $n {
+			Request(Request, ServiceUserHandle),
+			Response(Response),
 			$(
 				$cfm_wrapper($svc::Confirm),
 				$ind_wrapper($svc::Indication),
-				Request(Request, ServiceUserHandle),
-				Response(Response),
 			)*
 		}
 

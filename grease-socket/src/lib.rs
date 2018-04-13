@@ -205,19 +205,9 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
-/// Users can use this to send us messages.
-pub type ServiceProviderHandle =
-	grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
-
-/// A `socket` specific wrapper around `grease::ServiceUserHandle`. We use this to
-/// talk to our users.
-pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
-
 /// Represents something a socket service user can hold on to to send us
 /// message.
-pub struct Handle {
-	chan: mio_more::channel::Sender<Incoming>,
-}
+pub struct Handle(mio_more::channel::Sender<Incoming>);
 
 /// Uniquely identifies an listening socket
 pub type ListenHandle = Context;
@@ -254,12 +244,10 @@ pub enum ConnectionType {
 //
 // ****************************************************************************
 
-/// The set of all messages that this task can receive.
-enum Incoming {
-	/// One of our own requests that has come in
-	Request(Request, ServiceUserHandle),
-	/// One of our own responses that has come in
-	Response(Response),
+service_map! {
+	generate => Incoming,
+	handle => Handle,
+	services => [ ]
 }
 
 /// Created for every bound (i.e. listening) socket
@@ -336,7 +324,7 @@ pub fn make_task() -> ServiceProviderHandle {
 			task_context.poll();
 		}
 	});
-	Box::new(Handle { chan: mio_tx })
+	Box::new(Handle(mio_tx))
 }
 
 // ****************************************************************************
@@ -732,24 +720,6 @@ impl TaskContext {
 			// Try and read it - won't hurt if we can't.
 			self.read_from_socket(rsp_received.handle)
 		}
-	}
-}
-
-impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
-	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-		self.chan
-			.send(Incoming::Request(req, reply_to.clone()))
-			.unwrap();
-	}
-
-	fn send_response(&self, rsp: Response) {
-		self.chan.send(Incoming::Response(rsp)).unwrap();
-	}
-
-	fn clone(&self) -> ServiceProviderHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
 	}
 }
 
