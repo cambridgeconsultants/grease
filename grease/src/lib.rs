@@ -143,6 +143,93 @@ macro_rules! make_wrapper(
 	}
 );
 
+#[macro_export]
+macro_rules! app_map {
+	(
+		generate => $n:ident,
+		handle => $handle_type:ident,
+		services => [
+			$( ( $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident ) ),*
+		]
+	) => {
+		#[derive(Debug)]
+		enum $n {
+			$(
+				$cfm_wrapper($svc::Confirm),
+				$ind_wrapper($svc::Indication),
+			)*
+		}
+
+		$(
+			impl grease::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
+				fn send_confirm(&self, msg: $svc::Confirm) {
+					self.0.send($n::$cfm_wrapper(msg)).unwrap();
+				}
+				fn send_indication(&self, msg: $svc::Indication) {
+					self.0.send($n::$ind_wrapper(msg)).unwrap();
+				}
+				fn clone(&self) -> $svc::ServiceUserHandle {
+					Box::new($handle_type(self.0.clone()))
+				}
+			}
+		)*
+	}
+}
+
+#[macro_export]
+macro_rules! service_map {
+	(
+		generate => $n:ident,
+		handle => $handle_type:ident,
+		services => [
+			$( ( $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident ) ),*
+		]
+	) => {
+
+		/// Users can use this to send us messages.
+		pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
+
+		/// A layer specific wrapper around `grease::ServiceUserHandle`. We
+		/// use this to talk to our users.
+		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+
+		enum $n {
+			$(
+				$cfm_wrapper($svc::Confirm),
+				$ind_wrapper($svc::Indication),
+				Request(Request, ServiceUserHandle),
+				Response(Response),
+			)*
+		}
+
+		impl grease::ServiceProvider<Request, Confirm, Indication, Response> for $handle_type {
+			fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+				self.0.send($n::Request(msg, reply_to.clone())).unwrap();
+			}
+			fn send_response(&self, msg: Response) {
+				self.0.send($n::Response(msg)).unwrap();
+			}
+			fn clone(&self) -> ServiceProviderHandle {
+				Box::new($handle_type(self.0.clone()))
+			}
+		}
+
+		$(
+			impl grease::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
+				fn send_confirm(&self, msg: $svc::Confirm) {
+					self.0.send($n::$cfm_wrapper(msg)).unwrap();
+				}
+				fn send_indication(&self, msg: $svc::Indication) {
+					self.0.send($n::$ind_wrapper(msg)).unwrap();
+				}
+				fn clone(&self) -> $svc::ServiceUserHandle {
+					Box::new($handle_type(self.0.clone()))
+				}
+			}
+		)*
+	}
+}
+
 /// A type used to passing context between layers. If each layer maintains
 /// a `HashMap<Context, T>`, when a confirmation comes back from the layer
 /// below, it's easy to work out which T it corresponds to.

@@ -110,6 +110,9 @@ pub enum Indication {
 make_wrapper!(IndRxRequest, Indication, Indication::RxRequest);
 make_wrapper!(IndClosed, Indication, Indication::Closed);
 
+#[derive(Debug)]
+pub enum Response {}
+
 /// A bind request - start an HTTP server on a given port.
 #[derive(Debug)]
 pub struct ReqBind {
@@ -201,18 +204,9 @@ pub struct IndClosed {
 //
 // ****************************************************************************
 
-/// Users can use this to send us messages.
-pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, ()>;
-
-/// A `http` specific wrapper around `grease::ServiceUserHandle`. We use this to
-/// talk to our users.
-pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
-
 /// Represents something an http service user can hold on to to send us
 /// message.
-pub struct Handle {
-	chan: mpsc::Sender<Incoming>,
-}
+pub struct Handle(mpsc::Sender<Incoming>);
 
 /// A new one of these is allocated for every new HTTP server
 pub type ServerHandle = Context;
@@ -246,14 +240,10 @@ pub enum Error {
 //
 // ****************************************************************************
 
-/// The set of all messages that this task can receive.
-enum Incoming {
-	/// One of our own requests that has come in
-	Request(Request, ServiceUserHandle),
-	/// Socket indication
-	SocketInd(socket::Indication),
-	/// Socket confirm
-	SocketCfm(socket::Confirm),
+service_map! {
+	generate => Incoming,
+	handle => Handle,
+	services => [ (socket, SocketCfm, SocketInd) ]
 }
 
 enum CfmType {
@@ -330,7 +320,7 @@ type ReplyContext = grease::ReplyContext<Confirm, Indication>;
 /// to send this task messages.
 pub fn make_task(socket: socket::ServiceProviderHandle) -> ServiceProviderHandle {
 	let (tx, rx) = mpsc::channel();
-	let handle = Handle { chan: tx.clone() };
+	let handle = Handle(tx.clone());
 	std::thread::spawn(move || {
 		let mut t = TaskContext::new(socket, handle);
 		for msg in rx.iter() {
@@ -338,7 +328,7 @@ pub fn make_task(socket: socket::ServiceProviderHandle) -> ServiceProviderHandle
 		}
 		panic!("This task should never die!");
 	});
-	Box::new(Handle { chan: tx })
+	Box::new(Handle(tx))
 }
 
 // ****************************************************************************
@@ -378,6 +368,9 @@ impl TaskContext {
 			Incoming::SocketInd(x) => {
 				debug!("Rx: {:?}", x);
 				self.handle_socket_ind(x);
+			}
+			Incoming::Response(x) => {
+				debug!("Rx: {:?}", x);
 			}
 		}
 	}
@@ -853,38 +846,6 @@ impl TaskContext {
 			.send_response(socket::Response::Received(socket::RspReceived {
 				handle: ind.handle,
 			}));
-	}
-}
-
-impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
-	fn send_confirm(&self, cfm: socket::Confirm) {
-		self.chan.send(Incoming::SocketCfm(cfm)).unwrap();
-	}
-
-	fn send_indication(&self, ind: socket::Indication) {
-		self.chan.send(Incoming::SocketInd(ind)).unwrap();
-	}
-
-	fn clone(&self) -> socket::ServiceUserHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
-	}
-}
-
-impl grease::ServiceProvider<Request, Confirm, Indication, ()> for Handle {
-	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-		self.chan
-			.send(Incoming::Request(req, reply_to.clone()))
-			.unwrap();
-	}
-
-	fn send_response(&self, _rsp: ()) {}
-
-	fn clone(&self) -> ServiceProviderHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
 	}
 }
 
