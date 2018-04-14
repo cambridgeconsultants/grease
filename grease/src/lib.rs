@@ -1,7 +1,9 @@
-//! # grease - Making threads easier when you have rust.
+//! # Grease - Tasks and message-passing in Rust.
 //!
-//! Copyright (c) Cambridge Consultants 2018
-//! See the top-level COPYRIGHT file for further information and licensing
+//! Copyright (c) Cambridge Consultants 2018.
+//!
+//! Dual MIT/Apache 2.0 licensed. See the top-level COPYRIGHT file for further
+//! information and licensing.
 //!
 //! ## Overview
 //!
@@ -45,8 +47,186 @@
 //! in a bottom up fashion, and not to create any circular dependencies
 //! between your tasks!
 //!
-//! Look in the top-level examples directory to see a TCP echo-server example
-//! and a very basic HTTP server example.
+//! Look in the `grease-http` and `grease-socket` examples directory to see a
+//! TCP echo-server example and a very basic HTTP server example.
+//!
+//! ## Handling incoming messages
+//!
+//! To handle incoming messages you need to implement the `ServiceProvider`
+//! trait for your own messages, and the `ServiceUser` trait for any messages
+//! you wish to handle from lower layers. You can do this with an enum and a
+//! channel, and then implementing the traits so that they pack the message
+//! into your enum wrapper and then stuff it in to the queue.
+//!
+//! ```
+//! #[macro_use] extern crate grease;
+//! use std::sync::mpsc;
+//!
+//! mod foo {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! mod bar {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! pub enum Request {}
+//! pub enum Confirm {}
+//! pub enum Indication {}
+//! pub enum Response {}
+//!
+//!	pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
+//!	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//!
+//! enum Incoming {
+//!     FooServiceCfm(foo::Confirm),
+//!     FooServiceInd(foo::Indication),
+//!     BarServiceCfm(bar::Confirm),
+//!     BarServiceInd(bar::Indication),
+//!     Request(Request, ServiceUserHandle),
+//!     Response(Response),
+//! }
+//!
+//! struct Handle(mpsc::Sender<Incoming>);
+//!
+//!	impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
+//!		fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+//!			self.0.send(Incoming::Request(msg, reply_to.clone())).unwrap();
+//!		}
+//!		fn send_response(&self, msg: Response) {
+//!			self.0.send(Incoming::Response(msg)).unwrap();
+//!		}
+//!		fn clone(&self) -> ServiceProviderHandle {
+//!			Box::new(Handle(self.0.clone()))
+//!		}
+//!	}
+//!
+//!	impl grease::ServiceUser<foo::Confirm, foo::Indication> for Handle {
+//!		fn send_confirm(&self, msg: foo::Confirm) {
+//!			self.0.send(Incoming::FooServiceCfm(msg)).unwrap();
+//!		}
+//!		fn send_indication(&self, msg: foo::Indication) {
+//!			self.0.send(Incoming::FooServiceInd(msg)).unwrap();
+//!		}
+//!		fn clone(&self) -> foo::ServiceUserHandle {
+//!			Box::new(Handle(self.0.clone()))
+//!		}
+//!	}
+//!
+//!	impl grease::ServiceUser<bar::Confirm, bar::Indication> for Handle {
+//!		fn send_confirm(&self, msg: bar::Confirm) {
+//!			self.0.send(Incoming::BarServiceCfm(msg)).unwrap();
+//!		}
+//!		fn send_indication(&self, msg: bar::Indication) {
+//!			self.0.send(Incoming::BarServiceInd(msg)).unwrap();
+//!		}
+//!		fn clone(&self) -> bar::ServiceUserHandle {
+//!			Box::new(Handle(self.0.clone()))
+//!		}
+//!	}
+//!
+//! # fn main() { }
+//! ```
+//!
+//! Now that's quite a lot of boilerplate and handle-turning, so there is a
+//! macro called `service_map!` which can implement all the the above
+//! automatically. It simply requires that your messages are named `Request`,
+//! `Confirm`, `Indication` and `Response`, and that the handle type you
+//! specify is a tuple-struct where the first item has a `send` method which
+//! takes the auto-generated type.
+//!
+//! ```
+//! #[macro_use] extern crate grease;
+//! use std::sync::mpsc;
+//!
+//! mod foo {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! mod bar {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! pub enum Request {}
+//! pub enum Confirm {}
+//! pub enum Indication {}
+//! pub enum Response {}
+//!
+//! pub struct Handle(mpsc::Sender<Incoming>);
+//!
+//! service_map! {
+//! 	generate => Incoming,
+//! 	handle => Handle,
+//! 	services => [
+//! 		(foo, FooServiceCfm, FooServiceInd),
+//! 		(bar, BarServiceCfm, BarServiceInd)
+//! 	]
+//! }
+//!
+//! # fn main() { }
+//! ```
+//!
+//! Those two code blocks are entirely equivalent, but the macro is a lot
+//! shorter! The reason we don't generate the `Handle` is that you might
+//! wish to use a different sort of queue.
+//!
+//! ```ignore
+//! pub struct Handle(mio_more::channel::Sender<Incoming>);
+//! service_map! {
+//! 	generate => Incoming,
+//! 	handle => Handle,
+//! 	services => [
+//! 		(foo, FooServiceCfm, FooServiceInd),
+//! 		(bar, BarServiceCfm, BarServiceInd)
+//! 	]
+//! }
+//! ```
+//!
+//! If you are writing an application which uses services but does not
+//! provide its own, you can use `app_map!`.
+//!
+//! ```
+//! #[macro_use] extern crate grease;
+//! use std::sync::mpsc;
+//!
+//! mod foo {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! mod bar {
+//!		use super::grease;
+//! 	pub enum Confirm {}
+//! 	pub enum Indication {}
+//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! pub struct Handle(mpsc::Sender<Incoming>);
+//!
+//! app_map! {
+//! 	generate => Incoming,
+//! 	handle => Handle,
+//! 	services => [
+//! 		(foo, FooServiceCfm, FooServiceInd),
+//! 		(bar, BarServiceCfm, BarServiceInd)
+//! 	]
+//! }
+//! # fn main() { }
+//! ```
 
 // ****************************************************************************
 //
@@ -152,7 +332,6 @@ macro_rules! app_map {
 			$( ( $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident ) ),*
 		]
 	) => {
-		#[derive(Debug)]
 		enum $n {
 			$(
 				$cfm_wrapper($svc::Confirm),
