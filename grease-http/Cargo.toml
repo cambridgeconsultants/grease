@@ -10,3 +10,6 @@ grease-socket = { path = "../grease-socket" }
 log = "0.4.1"
 rushttp = { git = "https://github.com/thejpster/rushttp" }
 multi-map = "*"
+
+[dev-dependencies]
+env_logger = "0.5.6"

@@ -5,13 +5,9 @@ authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
 readme = "README.md"
 license-file = "COPYRIGHT"
 
-[dev-dependencies]
-env_logger = "0.5.6"
-log = "0.4.1"
-
-[dependencies]
-grease-socket = { path = "./grease-socket" }
-grease-http = { path = "./grease-http" }
-grease = { path = "./grease" }
-
 [workspace]
+members = [
+	"grease",
+	"grease-socket",
+	"grease-http",
+]
