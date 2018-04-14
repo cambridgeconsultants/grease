@@ -1,6 +1,6 @@
 [package]
 name = "grease-http"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
 license-file = "../COPYRIGHT"
 
