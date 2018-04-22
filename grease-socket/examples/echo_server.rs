@@ -35,11 +35,11 @@ use grease::Context;
 struct Handle(mpsc::Sender<Incoming>);
 
 app_map! {
-	generate => Incoming,
-	handle => Handle,
-	services => [
-		(socket, SocketCfm, SocketInd)
-	]
+	generate: Incoming,
+	handle: Handle,
+	used: {
+		socket: (SocketCfm, SocketInd)
+	}
 }
 
 // ****************************************************************************

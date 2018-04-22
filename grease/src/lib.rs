@@ -167,12 +167,12 @@
 //! pub struct Handle(mpsc::Sender<Incoming>);
 //!
 //! service_map! {
-//! 	generate => Incoming,
-//! 	handle => Handle,
-//! 	services => [
-//! 		(foo, FooServiceCfm, FooServiceInd),
-//! 		(bar, BarServiceCfm, BarServiceInd)
-//! 	]
+//! 	generate: Incoming,
+//! 	handle: Handle,
+//! 	used: {
+//! 		foo: (FooServiceCfm, FooServiceInd),
+//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 	}
 //! }
 //!
 //! # fn main() { }
@@ -184,13 +184,14 @@
 //!
 //! ```ignore
 //! pub struct Handle(mio_more::channel::Sender<Incoming>);
+//!
 //! service_map! {
-//! 	generate => Incoming,
-//! 	handle => Handle,
-//! 	services => [
-//! 		(foo, FooServiceCfm, FooServiceInd),
-//! 		(bar, BarServiceCfm, BarServiceInd)
-//! 	]
+//! 	generate: Incoming,
+//! 	handle: Handle,
+//! 	used: {
+//! 		foo: (FooServiceCfm, FooServiceInd),
+//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 	}
 //! }
 //! ```
 //!
@@ -218,12 +219,12 @@
 //! pub struct Handle(mpsc::Sender<Incoming>);
 //!
 //! app_map! {
-//! 	generate => Incoming,
-//! 	handle => Handle,
-//! 	services => [
-//! 		(foo, FooServiceCfm, FooServiceInd),
-//! 		(bar, BarServiceCfm, BarServiceInd)
-//! 	]
+//! 	generate: Incoming,
+//! 	handle: Handle,
+//! 	used: {
+//! 		foo: (FooServiceCfm, FooServiceInd),
+//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 	}
 //! }
 //! # fn main() { }
 //! ```
@@ -326,11 +327,11 @@ macro_rules! make_wrapper(
 #[macro_export]
 macro_rules! app_map {
 	(
-		generate => $n:ident,
-		handle => $handle_type:ident,
-		services => [
-			$( ( $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident ) ),*
-		]
+		generate: $n:ident,
+		handle: $handle_type:ident,
+		used: {
+			$( $svc:ident: ($cfm_wrapper:ident, $ind_wrapper:ident) ),*
+		}
 	) => {
 		enum $n {
 			$(
@@ -358,11 +359,11 @@ macro_rules! app_map {
 #[macro_export]
 macro_rules! service_map {
 	(
-		generate => $n:ident,
-		handle => $handle_type:ident,
-		services => [
-			$( ( $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident ) ),*
-		]
+		generate: $n:ident,
+		handle: $handle_type:ident,
+		used: {
+			$( $svc:ident: ($cfm_wrapper:ident, $ind_wrapper:ident) ),*
+		}
 	) => {
 
 		/// Users can use this to send us messages.

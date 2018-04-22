@@ -245,9 +245,9 @@ pub enum ConnectionType {
 // ****************************************************************************
 
 service_map! {
-	generate => Incoming,
-	handle => Handle,
-	services => [ ]
+	generate: Incoming,
+	handle: Handle,
+	used: { }
 }
 
 /// Created for every bound (i.e. listening) socket
