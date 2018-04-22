@@ -439,13 +439,6 @@ macro_rules! service_map {
 		}
 	) => {
 
-		/// Users can use this to send us messages.
-		pub type ServiceProviderHandle = $crate::ServiceProviderHandle<$our_svc>;
-
-		/// A layer specific wrapper around `$crate::ServiceUserHandle`. We
-		/// use this to talk to our users.
-		pub type ServiceUserHandle = $crate::ServiceUserHandle<$our_svc>;
-
 		enum $n {
 			Request(<$our_svc as $crate::Service>::Request, $crate::ServiceUserHandle<$our_svc>),
 			Response(<$our_svc as $crate::Service>::Response),

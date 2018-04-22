@@ -264,7 +264,7 @@ service_map! {
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
 	handle: ListenHandle,
-	ind_to: ServiceUserHandle,
+	ind_to: Box<grease::ServiceUser<Service>>,
 	listener: mio::tcp::TcpListener,
 }
 
@@ -273,13 +273,13 @@ struct PendingWrite {
 	context: Context,
 	sent: usize,
 	data: Vec<u8>,
-	reply_to: ServiceUserHandle,
+	reply_to: Box<grease::ServiceUser<Service>>,
 }
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
 	// parent: ListenHandle,
-	ind_to: ServiceUserHandle,
+	ind_to: Box<grease::ServiceUser<Service>>,
 	handle: ConnHandle,
 	connection: mio::tcp::TcpStream,
 	/// There's a read the user hasn't process yet
@@ -327,7 +327,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> grease::ServiceProviderHandle<Service> {
+pub fn make_task() -> Handle {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
@@ -335,7 +335,7 @@ pub fn make_task() -> grease::ServiceProviderHandle<Service> {
 			task_context.poll();
 		}
 	});
-	Box::new(Handle(mio_tx))
+	Handle(mio_tx)
 }
 
 // ****************************************************************************
@@ -569,7 +569,7 @@ impl TaskContext {
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self, req: Request, reply_to: ServiceUserHandle) {
+	pub fn handle_socket_req(&mut self, req: Request, reply_to: Box<grease::ServiceUser<Service>>) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::Close(x) => self.handle_close(x, reply_to),
@@ -578,14 +578,18 @@ impl TaskContext {
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: Box<grease::ServiceUser<Service>>) {
 		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
 		match req_bind.conn_type {
 			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
 		}
 	}
 
-	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
+	fn handle_stream_bind(
+		&mut self,
+		req_bind: ReqBind,
+		reply_to: Box<grease::ServiceUser<Service>>,
+	) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
 				let h = self.next_handle.take();
@@ -625,7 +629,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self, req_close: ReqClose, reply_to: ServiceUserHandle) {
+	fn handle_close(&mut self, req_close: ReqClose, reply_to: Box<grease::ServiceUser<Service>>) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -644,7 +648,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self, req_send: ReqSend, reply_to: ServiceUserHandle) {
+	fn handle_send(&mut self, req_send: ReqSend, reply_to: Box<grease::ServiceUser<Service>>) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -812,7 +816,7 @@ mod test {
 		fn send_indication(&self, ind: Indication) {
 			self.0.send(TestIncoming::SocketInd(ind)).unwrap();
 		}
-		fn clone(&self) -> ServiceUserHandle {
+		fn clone(&self) -> Box<grease::ServiceUser<Service>> {
 			Box::new(TestHandle(self.0.clone()))
 		}
 	}

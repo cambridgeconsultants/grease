@@ -269,7 +269,7 @@ enum CfmType {
 /// for a Cfm from the socket task, use a PendingCfm to store
 /// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
-	reply_to: ServiceUserHandle,
+	reply_to: Box<grease::ServiceUser<Service>>,
 	context: Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
@@ -286,7 +286,7 @@ struct Server {
 	/// The handle by which the upper layer refers to us
 	our_handle: ServerHandle,
 	/// Who to tell about the new connections we get
-	ind_to: ServiceUserHandle,
+	ind_to: Box<grease::ServiceUser<Service>>,
 }
 
 struct Connection {
@@ -305,9 +305,12 @@ struct Connection {
 	body_length: Option<usize>,
 }
 
-struct TaskContext {
+struct TaskContext<T>
+where
+	T: grease::ServiceProvider<socket::Service>,
+{
 	/// Who we send socket messages to
-	socket: socket::ServiceProviderHandle,
+	socket: T,
 	/// How the tasks we use send messages to us
 	reply_to: Handle,
 	/// Our list of servers, indexed by the handle given in CfmBind
@@ -331,7 +334,10 @@ type ReplyContext = grease::ReplyContext<Service>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: socket::ServiceProviderHandle) -> grease::ServiceProviderHandle<Service> {
+pub fn make_task<T>(socket: T) -> Handle
+where
+	T: grease::ServiceProvider<socket::Service> + Send + 'static,
+{
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle(tx.clone());
 	std::thread::spawn(move || {
@@ -341,7 +347,7 @@ pub fn make_task(socket: socket::ServiceProviderHandle) -> grease::ServiceProvid
 		}
 		panic!("This task should never die!");
 	});
-	Box::new(Handle(tx))
+	Handle(tx)
 }
 
 // ****************************************************************************
@@ -351,9 +357,12 @@ pub fn make_task(socket: socket::ServiceProviderHandle) -> grease::ServiceProvid
 // ****************************************************************************
 
 /// All our handler functions are methods on this TaskContext structure.
-impl TaskContext {
+impl<S> TaskContext<S>
+where
+	S: grease::ServiceProvider<socket::Service>,
+{
 	/// Create a new TaskContext
-	fn new(socket: socket::ServiceProviderHandle, us: Handle) -> TaskContext {
+	fn new(socket: S, us: Handle) -> TaskContext<S> {
 		TaskContext {
 			socket: socket,
 			servers: MultiMap::new(),
@@ -404,7 +413,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_http_req(&mut self, req: Request, reply_to: ServiceUserHandle) {
+	fn handle_http_req(&mut self, req: Request, reply_to: Box<grease::ServiceUser<Service>>) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::ResponseStart(x) => self.handle_responsestart(x, reply_to),
@@ -412,7 +421,7 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: Box<grease::ServiceUser<Service>>) {
 		let reply_ctx = ReplyContext {
 			context: req_bind.context,
 			reply_to: reply_to.clone(),
@@ -506,7 +515,11 @@ impl TaskContext {
 	}
 
 	/// @todo We should we check they call this once and only once.
-	fn handle_responsestart(&mut self, req_start: ReqResponseStart, reply_to: ServiceUserHandle) {
+	fn handle_responsestart(
+		&mut self,
+		req_start: ReqResponseStart,
+		reply_to: Box<grease::ServiceUser<Service>>,
+	) {
 		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
 			let skt = {
 				let conn = self.get_conn_by_http_handle(&req_start.handle).unwrap();
@@ -517,7 +530,7 @@ impl TaskContext {
 			// Render the headers as a String
 			// Send to the socket server
 			// Send the cfm when the socket server has sent this data
-			let s = TaskContext::render_response(
+			let s = Self::render_response(
 				req_start.status,
 				&req_start.content_type,
 				req_start.length,
@@ -548,7 +561,11 @@ impl TaskContext {
 		}
 	}
 
-	fn handle_responsebody(&mut self, req_body: ReqResponseBody, reply_to: ServiceUserHandle) {
+	fn handle_responsebody(
+		&mut self,
+		req_body: ReqResponseBody,
+		reply_to: Box<grease::ServiceUser<Service>>,
+	) {
 		if self.get_conn_by_http_handle(&req_body.handle).is_some() {
 			let mut close_after = false;
 			let skt = {
@@ -711,7 +728,7 @@ impl TaskContext {
 						CfmResponseStart {
 							context: pend.context,
 							handle: pend.handle,
-							result: TaskContext::map_result(cfm.result),
+							result: Self::map_result(cfm.result),
 						}.into(),
 					);
 				}
@@ -720,7 +737,7 @@ impl TaskContext {
 						CfmResponseBody {
 							context: pend.context,
 							handle: pend.handle,
-							result: TaskContext::map_result(cfm.result),
+							result: Self::map_result(cfm.result),
 						}.into(),
 					);
 				}
@@ -744,7 +761,7 @@ impl TaskContext {
 						CfmResponseStart {
 							context: pend.context,
 							handle: pend.handle,
-							result: TaskContext::map_result(cfm.result),
+							result: Self::map_result(cfm.result),
 						}.into(),
 					);
 				}
@@ -753,7 +770,7 @@ impl TaskContext {
 						CfmResponseBody {
 							context: pend.context,
 							handle: pend.handle,
-							result: TaskContext::map_result(cfm.result),
+							result: Self::map_result(cfm.result),
 						}.into(),
 					);
 				}
@@ -874,7 +891,7 @@ mod test {
 	enum TestIncoming {
 		HttpCfm(Confirm),
 		HttpInd(Indication),
-		SocketReq(socket::Request, socket::ServiceUserHandle),
+		SocketReq(socket::Request, Box<grease::ServiceUser<socket::Service>>),
 		SocketRsp(socket::Response),
 	}
 	struct TestHandle(mpsc::Sender<TestIncoming>);
@@ -898,7 +915,7 @@ mod test {
 		fn send_indication(&self, ind: Indication) {
 			self.0.send(TestIncoming::HttpInd(ind)).unwrap();
 		}
-		fn clone(&self) -> ServiceUserHandle {
+		fn clone(&self) -> Box<grease::ServiceUser<Service>> {
 			Box::new(TestHandle(self.0.clone()))
 		}
 	}
@@ -916,9 +933,6 @@ mod test {
 		fn send_response(&self, rsp: socket::Response) {
 			self.0.send(TestIncoming::SocketRsp(rsp)).unwrap();
 		}
-		fn clone(&self) -> socket::ServiceProviderHandle {
-			Box::new(TestHandle(self.0.clone()))
-		}
 	}
 
 	fn make_test_channel() -> (TestHandle, mpsc::Receiver<TestIncoming>) {
@@ -926,21 +940,24 @@ mod test {
 		(TestHandle(test_tx), rx)
 	}
 
-	fn bind_port(
+	fn bind_port<T>(
 		this_thread: &TestHandle,
 		test_rx: &mpsc::Receiver<TestIncoming>,
-		http_north: &ServiceProviderHandle,
+		http_north: &T,
 		addr: &net::SocketAddr,
 		ctx: Context,
 		socket_handle: socket::ListenHandle,
-	) -> (ServerHandle, socket::ServiceUserHandle) {
+	) -> (ServerHandle, Box<grease::ServiceUser<socket::Service>>)
+	where
+		T: grease::ServiceProvider<Service>,
+	{
 		let bind_req = ReqBind {
 			addr: addr.clone(),
 			context: ctx,
 		};
 		http_north.send_request(bind_req.into(), this_thread);
 		let cfm = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
-		let reply_to_copy: socket::ServiceUserHandle;
+		let reply_to_copy: Box<grease::ServiceUser<socket::Service>>;
 		match cfm {
 			TestIncoming::SocketReq(socket::Request::Bind(ref x), ref reply_to) => {
 				assert_eq!(x.addr, *addr);
