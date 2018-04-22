@@ -305,12 +305,9 @@ struct Connection {
 	body_length: Option<usize>,
 }
 
-struct TaskContext<T>
-where
-	T: grease::ServiceProvider<socket::Service>,
-{
+struct TaskContext {
 	/// Who we send socket messages to
-	socket: T,
+	socket: grease::ServiceProviderHandle<socket::Service>,
 	/// How the tasks we use send messages to us
 	reply_to: Handle,
 	/// Our list of servers, indexed by the handle given in CfmBind
@@ -334,10 +331,7 @@ type ReplyContext = grease::ReplyContext<Service>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task<T>(socket: T) -> Handle
-where
-	T: grease::ServiceProvider<socket::Service> + Send + 'static,
-{
+pub fn make_task(socket: grease::ServiceProviderHandle<socket::Service>) -> Handle {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle(tx.clone());
 	std::thread::spawn(move || {
@@ -357,12 +351,9 @@ where
 // ****************************************************************************
 
 /// All our handler functions are methods on this TaskContext structure.
-impl<S> TaskContext<S>
-where
-	S: grease::ServiceProvider<socket::Service>,
-{
+impl TaskContext {
 	/// Create a new TaskContext
-	fn new(socket: S, us: Handle) -> TaskContext<S> {
+	fn new(socket: grease::ServiceProviderHandle<socket::Service>, us: Handle) -> TaskContext {
 		TaskContext {
 			socket: socket,
 			servers: MultiMap::new(),
@@ -886,7 +877,7 @@ mod test {
 	use std::sync::atomic;
 	use super::*;
 
-	use grease::ServiceProvider;
+	use grease::prelude::*;
 
 	enum TestIncoming {
 		HttpCfm(Confirm),
@@ -894,6 +885,7 @@ mod test {
 		SocketReq(socket::Request, grease::ServiceUserHandle<socket::Service>),
 		SocketRsp(socket::Response),
 	}
+
 	struct TestHandle(mpsc::Sender<TestIncoming>);
 
 	static PORT_NUMBER: atomic::AtomicUsize = atomic::AtomicUsize::new(8000);
@@ -932,6 +924,9 @@ mod test {
 		}
 		fn send_response(&self, rsp: socket::Response) {
 			self.0.send(TestIncoming::SocketRsp(rsp)).unwrap();
+		}
+		fn clone(&self) -> grease::ServiceProviderHandle<socket::Service> {
+			Box::new(TestHandle(self.0.clone()))
 		}
 	}
 
@@ -988,7 +983,7 @@ mod test {
 	fn bind_port_ok() {
 		let (reply_to, test_rx) = make_test_channel();
 		// Use ourselves as the 'socket' task
-		let http_north = make_task(reply_to.clone());
+		let http_north = make_task(grease::ServiceProvider::clone(&reply_to));
 		let _ = bind_port(
 			&reply_to,
 			&test_rx,
@@ -1003,7 +998,7 @@ mod test {
 	fn basic_get_vary_len() {
 		let (reply_to, test_rx) = make_test_channel();
 		// Use ourselves as the 'socket' task
-		let http_north = make_task(reply_to.clone());
+		let http_north = make_task(grease::ServiceProvider::clone(&reply_to));
 		let (sh, http_south) = bind_port(
 			&reply_to,
 			&test_rx,
@@ -1178,7 +1173,7 @@ mod test {
 	fn basic_get_fixed_len() {
 		let (reply_to, test_rx) = make_test_channel();
 		// Use ourselves as the 'socket' task
-		let http_north = make_task(reply_to.clone());
+		let http_north = make_task(grease::ServiceProvider::clone(&reply_to));
 		let (sh, http_south) = bind_port(
 			&reply_to,
 			&test_rx,

@@ -793,6 +793,7 @@ mod test {
 	use std::sync::mpsc;
 	use std::sync::atomic;
 	use rand::Rng;
+	use grease::prelude::*;
 	use super::*;
 
 	enum TestIncoming {

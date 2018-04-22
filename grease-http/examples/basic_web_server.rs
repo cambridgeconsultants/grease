@@ -67,7 +67,7 @@ fn main() {
 	info!("Running HTTP server on {}", bind_addr);
 
 	let socket_thread = socket::make_task();
-	let http_thread = http::make_task(socket_thread);
+	let http_thread = http::make_task(socket_thread.clone());
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle(tx);
 
