@@ -102,10 +102,10 @@
 //! pub enum Response {}
 //!
 //! enum Incoming {
-//! 	FooServiceCfm(<foo::Service as grease::Service>::Confirm),
-//! 	FooServiceInd(<foo::Service as grease::Service>::Indication),
-//! 	BarServiceCfm(<bar::Service as grease::Service>::Confirm),
-//! 	BarServiceInd(<bar::Service as grease::Service>::Indication),
+//! 	FooCfm(<foo::Service as grease::Service>::Confirm),
+//! 	FooInd(<foo::Service as grease::Service>::Indication),
+//! 	BarCfm(<bar::Service as grease::Service>::Confirm),
+//! 	BarInd(<bar::Service as grease::Service>::Indication),
 //! 	Request(Request, grease::ServiceUserHandle<Service>),
 //! 	Response(Response),
 //! }
@@ -126,10 +126,10 @@
 //!
 //! impl grease::ServiceUser<foo::Service> for Handle {
 //! 	fn send_confirm(&self, msg: <foo::Service as grease::Service>::Confirm) {
-//! 		self.0.send(Incoming::FooServiceCfm(msg)).unwrap();
+//! 		self.0.send(Incoming::FooCfm(msg)).unwrap();
 //! 	}
 //! 	fn send_indication(&self, msg: <foo::Service as grease::Service>::Indication) {
-//! 		self.0.send(Incoming::FooServiceInd(msg)).unwrap();
+//! 		self.0.send(Incoming::FooInd(msg)).unwrap();
 //! 	}
 //! 	fn clone(&self) -> grease::ServiceUserHandle<foo::Service> {
 //! 		Box::new(Handle(self.0.clone()))
@@ -138,10 +138,10 @@
 //!
 //! impl grease::ServiceUser<bar::Service> for Handle {
 //! 	fn send_confirm(&self, msg: <bar::Service as grease::Service>::Confirm) {
-//! 		self.0.send(Incoming::BarServiceCfm(msg)).unwrap();
+//! 		self.0.send(Incoming::BarCfm(msg)).unwrap();
 //! 	}
 //! 	fn send_indication(&self, msg: <bar::Service as grease::Service>::Indication) {
-//! 		self.0.send(Incoming::BarServiceInd(msg)).unwrap();
+//! 		self.0.send(Incoming::BarInd(msg)).unwrap();
 //! 	}
 //! 	fn clone(&self) -> grease::ServiceUserHandle<bar::Service> {
 //! 		Box::new(Handle(self.0.clone()))
@@ -208,8 +208,8 @@
 //! 	service: Service,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (Service, FooServiceCfm, FooServiceInd),
-//! 		bar: (Service, BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooCfm, FooInd),
+//! 		bar: (Service, BarCfm, BarInd)
 //! 	}
 //! }
 //!
@@ -228,8 +228,8 @@
 //! 	service: Service,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (Service, FooServiceCfm, FooServiceInd),
-//! 		bar: (Service, BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooCfm, FooInd),
+//! 		bar: (Service, BarCfm, BarInd)
 //! 	}
 //! }
 //! ```
@@ -273,8 +273,8 @@
 //! 	generate: Incoming,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (Service, FooServiceCfm, FooServiceInd),
-//! 		bar: (Service, BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooCfm, FooInd),
+//! 		bar: (Service, BarCfm, BarInd)
 //! 	}
 //! }
 //! # fn main() { }
@@ -337,7 +337,7 @@ pub trait Service {
 /// The `clone` function returns the boxed trait, as the trait must be object
 /// safe - that is, it cannot refer to `Self` (which the normal implementation
 /// of `clone` would naturally do).
-pub trait ServiceProvider<T>
+pub trait ServiceProvider<T>: Send
 where
 	T: Service,
 {
@@ -351,7 +351,7 @@ where
 
 /// A boxed trait object, which a user can use to send messages in to a
 /// provider.
-pub type ServiceProviderHandle<T> = Box<ServiceProvider<T> + Send>;
+pub type ServiceProviderHandle<T> = Box<ServiceProvider<T>>;
 
 /// A Service User consumes the service provided by a Service Provider.
 ///
@@ -362,7 +362,7 @@ pub type ServiceProviderHandle<T> = Box<ServiceProvider<T> + Send>;
 /// The `clone` function returns the boxed trait, as the trait must be object
 /// safe - that is, it cannot refer to `Self` (which the normal implementation
 /// of `clone` would naturally do).
-pub trait ServiceUser<T>
+pub trait ServiceUser<T>: Send
 where
 	T: Service,
 {
@@ -376,7 +376,7 @@ where
 
 /// A boxed trait object, which the provider can use to send messages back to
 /// the user.
-pub type ServiceUserHandle<T> = Box<ServiceUser<T> + Send>;
+pub type ServiceUserHandle<T> = Box<ServiceUser<T>>;
 
 #[macro_export]
 macro_rules! make_wrapper(
