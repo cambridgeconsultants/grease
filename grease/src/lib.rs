@@ -64,16 +64,36 @@
 //!
 //! mod foo {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! pub struct Service;
+//! impl grease::Service for Service {
+//! 	type Request = Request;
+//! 	type Confirm = Confirm;
+//! 	type Indication = Indication;
+//! 	type Response = Response;
 //! }
 //!
 //! pub enum Request {}
@@ -81,52 +101,49 @@
 //! pub enum Indication {}
 //! pub enum Response {}
 //!
-//! pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
-//! pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
-//!
 //! enum Incoming {
-//!     FooServiceCfm(foo::Confirm),
-//!     FooServiceInd(foo::Indication),
-//!     BarServiceCfm(bar::Confirm),
-//!     BarServiceInd(bar::Indication),
-//!     Request(Request, ServiceUserHandle),
-//!     Response(Response),
+//! 	FooServiceCfm(<foo::Service as grease::Service>::Confirm),
+//! 	FooServiceInd(<foo::Service as grease::Service>::Indication),
+//! 	BarServiceCfm(<bar::Service as grease::Service>::Confirm),
+//! 	BarServiceInd(<bar::Service as grease::Service>::Indication),
+//! 	Request(Request, grease::ServiceUserHandle<Service>),
+//! 	Response(Response),
 //! }
 //!
 //! struct Handle(mpsc::Sender<Incoming>);
 //!
-//! impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
-//! 	fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+//! impl grease::ServiceProvider<Service> for Handle {
+//! 	fn send_request(&self, msg: <Service as grease::Service>::Request, reply_to: &grease::ServiceUser<Service>) {
 //! 		self.0.send(Incoming::Request(msg, reply_to.clone())).unwrap();
 //! 	}
-//! 	fn send_response(&self, msg: Response) {
+//! 	fn send_response(&self, msg: <Service as grease::Service>::Response) {
 //! 		self.0.send(Incoming::Response(msg)).unwrap();
 //! 	}
-//! 	fn clone(&self) -> ServiceProviderHandle {
+//! 	fn clone(&self) -> grease::ServiceProviderHandle<Service> {
 //! 		Box::new(Handle(self.0.clone()))
 //! 	}
 //! }
 //!
-//! impl grease::ServiceUser<foo::Confirm, foo::Indication> for Handle {
-//! 	fn send_confirm(&self, msg: foo::Confirm) {
+//! impl grease::ServiceUser<foo::Service> for Handle {
+//! 	fn send_confirm(&self, msg: <foo::Service as grease::Service>::Confirm) {
 //! 		self.0.send(Incoming::FooServiceCfm(msg)).unwrap();
 //! 	}
-//! 	fn send_indication(&self, msg: foo::Indication) {
+//! 	fn send_indication(&self, msg: <foo::Service as grease::Service>::Indication) {
 //! 		self.0.send(Incoming::FooServiceInd(msg)).unwrap();
 //! 	}
-//! 	fn clone(&self) -> foo::ServiceUserHandle {
+//! 	fn clone(&self) -> grease::ServiceUserHandle<foo::Service> {
 //! 		Box::new(Handle(self.0.clone()))
 //! 	}
 //! }
 //!
-//! impl grease::ServiceUser<bar::Confirm, bar::Indication> for Handle {
-//! 	fn send_confirm(&self, msg: bar::Confirm) {
+//! impl grease::ServiceUser<bar::Service> for Handle {
+//! 	fn send_confirm(&self, msg: <bar::Service as grease::Service>::Confirm) {
 //! 		self.0.send(Incoming::BarServiceCfm(msg)).unwrap();
 //! 	}
-//! 	fn send_indication(&self, msg: bar::Indication) {
+//! 	fn send_indication(&self, msg: <bar::Service as grease::Service>::Indication) {
 //! 		self.0.send(Incoming::BarServiceInd(msg)).unwrap();
 //! 	}
-//! 	fn clone(&self) -> bar::ServiceUserHandle {
+//! 	fn clone(&self) -> grease::ServiceUserHandle<bar::Service> {
 //! 		Box::new(Handle(self.0.clone()))
 //! 	}
 //! }
@@ -147,16 +164,36 @@
 //!
 //! mod foo {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! }
+//!
+//! pub struct Service;
+//! impl grease::Service for Service {
+//! 	type Request = Request;
+//! 	type Confirm = Confirm;
+//! 	type Indication = Indication;
+//! 	type Response = Response;
 //! }
 //!
 //! pub enum Request {}
@@ -168,10 +205,11 @@
 //!
 //! service_map! {
 //! 	generate: Incoming,
+//! 	service: Service,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (FooServiceCfm, FooServiceInd),
-//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooServiceCfm, FooServiceInd),
+//! 		bar: (Service, BarServiceCfm, BarServiceInd)
 //! 	}
 //! }
 //!
@@ -187,10 +225,11 @@
 //!
 //! service_map! {
 //! 	generate: Incoming,
+//! 	service: Service,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (FooServiceCfm, FooServiceInd),
-//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooServiceCfm, FooServiceInd),
+//! 		bar: (Service, BarServiceCfm, BarServiceInd)
 //! 	}
 //! }
 //! ```
@@ -204,16 +243,28 @@
 //!
 //! mod foo {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
 //! 	use super::grease;
+//! 	pub struct Service;
+//! 	impl grease::Service for Service {
+//! 		type Request = ();
+//! 		type Confirm = Confirm;
+//! 		type Indication = Indication;
+//! 		type Response = ();
+//! 	}
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! pub struct Handle(mpsc::Sender<Incoming>);
@@ -222,8 +273,8 @@
 //! 	generate: Incoming,
 //! 	handle: Handle,
 //! 	used: {
-//! 		foo: (FooServiceCfm, FooServiceInd),
-//! 		bar: (BarServiceCfm, BarServiceInd)
+//! 		foo: (Service, FooServiceCfm, FooServiceInd),
+//! 		bar: (Service, BarServiceCfm, BarServiceInd)
 //! 	}
 //! }
 //! # fn main() { }
@@ -267,6 +318,15 @@ pub mod prelude;
 //
 // ****************************************************************************
 
+/// This is the trait for a Service.
+/// It's basically a wrapper for the four associated types.
+pub trait Service {
+	type Request;
+	type Confirm;
+	type Indication;
+	type Response;
+}
+
 /// This is the trait for a Service Provider.
 ///
 /// A Service Provider can receive requests and responses. These are given the
@@ -277,19 +337,21 @@ pub mod prelude;
 /// The `clone` function returns the boxed trait, as the trait must be object
 /// safe - that is, it cannot refer to `Self` (which the normal implementation
 /// of `clone` would naturally do).
-pub trait ServiceProvider<REQ, CFM, IND, RSP> {
+pub trait ServiceProvider<T>
+where
+	T: Service,
+{
 	/// Call this to send a request to this provider.
-	fn send_request(&self, req: REQ, reply_to: &ServiceUser<CFM, IND>);
+	fn send_request(&self, req: T::Request, reply_to: &ServiceUser<T>);
 	/// Call this to send a response to this provider.
-	fn send_response(&self, rsp: RSP);
+	fn send_response(&self, rsp: T::Response);
 	/// Call this to clone this object so another task can use it.
-	fn clone(&self) -> ServiceProviderHandle<REQ, CFM, IND, RSP>;
+	fn clone(&self) -> ServiceProviderHandle<T>;
 }
 
 /// A boxed trait object, which a user can use to send messages in to a
 /// provider.
-pub type ServiceProviderHandle<REQ, CFM, IND, RSP> =
-	Box<ServiceProvider<REQ, CFM, IND, RSP> + Send>;
+pub type ServiceProviderHandle<T> = Box<ServiceProvider<T> + Send>;
 
 /// A Service User consumes the service provided by a Service Provider.
 ///
@@ -300,18 +362,21 @@ pub type ServiceProviderHandle<REQ, CFM, IND, RSP> =
 /// The `clone` function returns the boxed trait, as the trait must be object
 /// safe - that is, it cannot refer to `Self` (which the normal implementation
 /// of `clone` would naturally do).
-pub trait ServiceUser<CFM, IND> {
+pub trait ServiceUser<T>
+where
+	T: Service,
+{
 	/// Call this to send a confirmation back to the service user.
-	fn send_confirm(&self, cfm: CFM);
+	fn send_confirm(&self, cfm: T::Confirm);
 	/// Call this to send an indication to the service user.
-	fn send_indication(&self, ind: IND);
+	fn send_indication(&self, ind: T::Indication);
 	/// Call this so we can store this user reference in two places.
-	fn clone(&self) -> ServiceUserHandle<CFM, IND>;
+	fn clone(&self) -> ServiceUserHandle<T>;
 }
 
 /// A boxed trait object, which the provider can use to send messages back to
 /// the user.
-pub type ServiceUserHandle<CFM, IND> = Box<ServiceUser<CFM, IND> + Send>;
+pub type ServiceUserHandle<T> = Box<ServiceUser<T> + Send>;
 
 #[macro_export]
 macro_rules! make_wrapper(
@@ -326,15 +391,15 @@ macro_rules! make_wrapper(
 
 #[macro_export]
 macro_rules! impl_user {
-	($handle_type:ident, $n:ident, $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident) => {
-		impl $crate::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
-			fn send_confirm(&self, msg: $svc::Confirm) {
+	($handle_type:ident, $n:ident, $svc:path, $cfm_wrapper:ident, $ind_wrapper:ident) => {
+		impl $crate::ServiceUser<$svc> for $handle_type {
+			fn send_confirm(&self, msg: <$svc as $crate::Service>::Confirm) {
 				self.0.send($n::$cfm_wrapper(msg)).unwrap();
 			}
-			fn send_indication(&self, msg: $svc::Indication) {
+			fn send_indication(&self, msg: <$svc as $crate::Service>::Indication) {
 				self.0.send($n::$ind_wrapper(msg)).unwrap();
 			}
-			fn clone(&self) -> $svc::ServiceUserHandle {
+			fn clone(&self) -> $crate::ServiceUserHandle<$svc> {
 				::std::boxed::Box::new($handle_type(::std::clone::Clone::clone(&self.0)))
 			}
 		}
@@ -347,18 +412,18 @@ macro_rules! app_map {
 		generate: $n:ident,
 		handle: $handle_type:ident,
 		used: {
-			$( $svc:ident: ($cfm_wrapper:ident, $ind_wrapper:ident) ),*
+			$( $used_mod:ident: ($used_service:ident, $cfm_wrapper:ident, $ind_wrapper:ident) ),*
 		}
 	) => {
 		enum $n {
 			$(
-				$cfm_wrapper($svc::Confirm),
-				$ind_wrapper($svc::Indication),
+				$cfm_wrapper(<$used_mod::$used_service as $crate::Service>::Confirm),
+				$ind_wrapper(<$used_mod::$used_service as $crate::Service>::Indication),
 			)*
 		}
 
 		$(
-			impl_user!($handle_type, $n, $svc, $cfm_wrapper, $ind_wrapper);
+			impl_user!($handle_type, $n, $used_mod::$used_service, $cfm_wrapper, $ind_wrapper);
 		)*
 	}
 }
@@ -367,42 +432,43 @@ macro_rules! app_map {
 macro_rules! service_map {
 	(
 		generate: $n:ident,
+		service: $our_svc:ident,
 		handle: $handle_type:ident,
 		used: {
-			$( $svc:ident: ($cfm_wrapper:ident, $ind_wrapper:ident) ),*
+			$( $used_mod:ident: ($used_service:ident, $cfm_wrapper:ident, $ind_wrapper:ident) ),*
 		}
 	) => {
 
 		/// Users can use this to send us messages.
-		pub type ServiceProviderHandle = $crate::ServiceProviderHandle<Request, Confirm, Indication, Response>;
+		pub type ServiceProviderHandle = $crate::ServiceProviderHandle<$our_svc>;
 
 		/// A layer specific wrapper around `$crate::ServiceUserHandle`. We
 		/// use this to talk to our users.
-		pub type ServiceUserHandle = $crate::ServiceUserHandle<Confirm, Indication>;
+		pub type ServiceUserHandle = $crate::ServiceUserHandle<$our_svc>;
 
 		enum $n {
-			Request(Request, ServiceUserHandle),
-			Response(Response),
+			Request(<$our_svc as $crate::Service>::Request, $crate::ServiceUserHandle<$our_svc>),
+			Response(<$our_svc as $crate::Service>::Response),
 			$(
-				$cfm_wrapper($svc::Confirm),
-				$ind_wrapper($svc::Indication),
+				$cfm_wrapper(<$used_mod::$used_service as $crate::Service>::Confirm),
+				$ind_wrapper(<$used_mod::$used_service as $crate::Service>::Indication),
 			)*
 		}
 
-		impl $crate::ServiceProvider<Request, Confirm, Indication, Response> for $handle_type {
-			fn send_request(&self, msg: Request, reply_to: &$crate::ServiceUser<Confirm, Indication>) {
+		impl $crate::ServiceProvider<$our_svc> for $handle_type {
+			fn send_request(&self, msg: <$our_svc as grease::Service>::Request, reply_to: &$crate::ServiceUser<$our_svc>) {
 				self.0.send($n::Request(msg, reply_to.clone())).unwrap();
 			}
-			fn send_response(&self, msg: Response) {
+			fn send_response(&self, msg: <$our_svc as grease::Service>::Response) {
 				self.0.send($n::Response(msg)).unwrap();
 			}
-			fn clone(&self) -> ServiceProviderHandle {
+			fn clone(&self) -> $crate::ServiceProviderHandle<$our_svc> {
 				::std::boxed::Box::new($handle_type(::std::clone::Clone::clone(&self.0)))
 			}
 		}
 
 		$(
-			impl_user!($handle_type, $n, $svc, $cfm_wrapper, $ind_wrapper);
+			impl_user!($handle_type, $n, $used_mod::$used_service, $cfm_wrapper, $ind_wrapper);
 		)*
 	}
 }
@@ -419,8 +485,8 @@ pub struct Context(usize);
 /// must be destroyed as soon as it arrives (for logging purposes), the
 /// essential details are recorded so that a Confirmation can be sent at a
 /// later date.
-pub struct ReplyContext<CFM, IND> {
-	pub reply_to: ServiceUserHandle<CFM, IND>,
+pub struct ReplyContext<T> {
+	pub reply_to: ServiceUserHandle<T>,
 	pub context: Context,
 }
 

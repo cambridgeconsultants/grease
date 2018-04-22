@@ -38,7 +38,7 @@ app_map! {
 	generate: Incoming,
 	handle: Handle,
 	used: {
-		socket: (SocketCfm, SocketInd)
+		socket: (Service, SocketCfm, SocketInd)
 	}
 }
 

@@ -40,6 +40,16 @@ use grease::Context;
 //
 // ****************************************************************************
 
+/// Offers the `grease::Service` for this module.
+pub struct Service;
+
+impl grease::Service for Service {
+	type Request = Request;
+	type Confirm = Confirm;
+	type Indication = Indication;
+	type Response = Response;
+}
+
 /// Requests that can be sent to the Socket task
 #[derive(Debug)]
 pub enum Request {
@@ -246,6 +256,7 @@ pub enum ConnectionType {
 
 service_map! {
 	generate: Incoming,
+	service: Service,
 	handle: Handle,
 	used: { }
 }
@@ -316,7 +327,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> ServiceProviderHandle {
+pub fn make_task() -> grease::ServiceProviderHandle<Service> {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
@@ -794,7 +805,7 @@ mod test {
 		)
 	}
 
-	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
+	impl grease::ServiceUser<Service> for TestHandle {
 		fn send_confirm(&self, cfm: Confirm) {
 			self.0.send(TestIncoming::SocketCfm(cfm)).unwrap();
 		}

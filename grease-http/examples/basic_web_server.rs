@@ -39,7 +39,7 @@ app_map! {
 	generate: Incoming,
 	handle: Handle,
 	used: {
-		http: (HttpCfm, HttpInd)
+		http: (Service, HttpCfm, HttpInd)
 	}
 }
 

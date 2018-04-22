@@ -68,6 +68,16 @@ use grease::Context;
 //
 // ****************************************************************************
 
+/// Offers the `grease::Service` for this module.
+pub struct Service;
+
+impl grease::Service for Service {
+	type Request = Request;
+	type Confirm = Confirm;
+	type Indication = Indication;
+	type Response = Response;
+}
+
 /// Requests that can be sent to the http task.
 #[derive(Debug)]
 pub enum Request {
@@ -242,9 +252,10 @@ pub enum Error {
 
 service_map! {
 	generate: Incoming,
+	service: Service,
 	handle: Handle,
 	used: {
-		socket: (SocketCfm, SocketInd)
+		socket: (Service, SocketCfm, SocketInd)
 	}
 }
 
@@ -310,7 +321,7 @@ struct TaskContext {
 	pending: HashMap<Context, PendingCfm>,
 }
 
-type ReplyContext = grease::ReplyContext<Confirm, Indication>;
+type ReplyContext = grease::ReplyContext<Service>;
 
 // ****************************************************************************
 //
@@ -320,7 +331,7 @@ type ReplyContext = grease::ReplyContext<Confirm, Indication>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: socket::ServiceProviderHandle) -> ServiceProviderHandle {
+pub fn make_task(socket: socket::ServiceProviderHandle) -> grease::ServiceProviderHandle<Service> {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle(tx.clone());
 	std::thread::spawn(move || {
@@ -880,7 +891,7 @@ mod test {
 		)
 	}
 
-	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
+	impl grease::ServiceUser<Service> for TestHandle {
 		fn send_confirm(&self, cfm: Confirm) {
 			self.0.send(TestIncoming::HttpCfm(cfm)).unwrap();
 		}
@@ -892,17 +903,11 @@ mod test {
 		}
 	}
 
-	impl grease::ServiceProvider<
-		socket::Request,
-		socket::Confirm,
-		socket::Indication,
-		socket::Response,
-	> for TestHandle
-	{
+	impl grease::ServiceProvider<socket::Service> for TestHandle {
 		fn send_request(
 			&self,
 			req: socket::Request,
-			reply_to: &grease::ServiceUser<socket::Confirm, socket::Indication>,
+			reply_to: &grease::ServiceUser<socket::Service>,
 		) {
 			self.0
 				.send(TestIncoming::SocketReq(req, reply_to.clone()))
