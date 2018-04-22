@@ -325,6 +325,23 @@ macro_rules! make_wrapper(
 );
 
 #[macro_export]
+macro_rules! impl_user {
+	($handle_type:ident, $n:ident, $svc:ident, $cfm_wrapper:ident, $ind_wrapper:ident) => {
+		impl $crate::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
+			fn send_confirm(&self, msg: $svc::Confirm) {
+				self.0.send($n::$cfm_wrapper(msg)).unwrap();
+			}
+			fn send_indication(&self, msg: $svc::Indication) {
+				self.0.send($n::$ind_wrapper(msg)).unwrap();
+			}
+			fn clone(&self) -> $svc::ServiceUserHandle {
+				::std::boxed::Box::new($handle_type(::std::clone::Clone::clone(&self.0)))
+			}
+		}
+	}
+}
+
+#[macro_export]
 macro_rules! app_map {
 	(
 		generate: $n:ident,
@@ -341,17 +358,7 @@ macro_rules! app_map {
 		}
 
 		$(
-			impl grease::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
-				fn send_confirm(&self, msg: $svc::Confirm) {
-					self.0.send($n::$cfm_wrapper(msg)).unwrap();
-				}
-				fn send_indication(&self, msg: $svc::Indication) {
-					self.0.send($n::$ind_wrapper(msg)).unwrap();
-				}
-				fn clone(&self) -> $svc::ServiceUserHandle {
-					Box::new($handle_type(self.0.clone()))
-				}
-			}
+			impl_user!($handle_type, $n, $svc, $cfm_wrapper, $ind_wrapper);
 		)*
 	}
 }
@@ -367,11 +374,11 @@ macro_rules! service_map {
 	) => {
 
 		/// Users can use this to send us messages.
-		pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
+		pub type ServiceProviderHandle = $crate::ServiceProviderHandle<Request, Confirm, Indication, Response>;
 
-		/// A layer specific wrapper around `grease::ServiceUserHandle`. We
+		/// A layer specific wrapper around `$crate::ServiceUserHandle`. We
 		/// use this to talk to our users.
-		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+		pub type ServiceUserHandle = $crate::ServiceUserHandle<Confirm, Indication>;
 
 		enum $n {
 			Request(Request, ServiceUserHandle),
@@ -382,30 +389,20 @@ macro_rules! service_map {
 			)*
 		}
 
-		impl grease::ServiceProvider<Request, Confirm, Indication, Response> for $handle_type {
-			fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+		impl $crate::ServiceProvider<Request, Confirm, Indication, Response> for $handle_type {
+			fn send_request(&self, msg: Request, reply_to: &$crate::ServiceUser<Confirm, Indication>) {
 				self.0.send($n::Request(msg, reply_to.clone())).unwrap();
 			}
 			fn send_response(&self, msg: Response) {
 				self.0.send($n::Response(msg)).unwrap();
 			}
 			fn clone(&self) -> ServiceProviderHandle {
-				Box::new($handle_type(self.0.clone()))
+				::std::boxed::Box::new($handle_type(::std::clone::Clone::clone(&self.0)))
 			}
 		}
 
 		$(
-			impl grease::ServiceUser<$svc::Confirm, $svc::Indication> for $handle_type {
-				fn send_confirm(&self, msg: $svc::Confirm) {
-					self.0.send($n::$cfm_wrapper(msg)).unwrap();
-				}
-				fn send_indication(&self, msg: $svc::Indication) {
-					self.0.send($n::$ind_wrapper(msg)).unwrap();
-				}
-				fn clone(&self) -> $svc::ServiceUserHandle {
-					Box::new($handle_type(self.0.clone()))
-				}
-			}
+			impl_user!($handle_type, $n, $svc, $cfm_wrapper, $ind_wrapper);
 		)*
 	}
 }
