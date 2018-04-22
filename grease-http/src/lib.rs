@@ -269,7 +269,7 @@ enum CfmType {
 /// for a Cfm from the socket task, use a PendingCfm to store
 /// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
-	reply_to: Box<grease::ServiceUser<Service>>,
+	reply_to: grease::ServiceUserHandle<Service>,
 	context: Context,
 	cfm_type: CfmType,
 	handle: ConnHandle,
@@ -286,7 +286,7 @@ struct Server {
 	/// The handle by which the upper layer refers to us
 	our_handle: ServerHandle,
 	/// Who to tell about the new connections we get
-	ind_to: Box<grease::ServiceUser<Service>>,
+	ind_to: grease::ServiceUserHandle<Service>,
 }
 
 struct Connection {
@@ -413,7 +413,7 @@ where
 		}
 	}
 
-	fn handle_http_req(&mut self, req: Request, reply_to: Box<grease::ServiceUser<Service>>) {
+	fn handle_http_req(&mut self, req: Request, reply_to: grease::ServiceUserHandle<Service>) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::ResponseStart(x) => self.handle_responsestart(x, reply_to),
@@ -421,7 +421,7 @@ where
 		}
 	}
 
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: Box<grease::ServiceUser<Service>>) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: grease::ServiceUserHandle<Service>) {
 		let reply_ctx = ReplyContext {
 			context: req_bind.context,
 			reply_to: reply_to.clone(),
@@ -518,7 +518,7 @@ where
 	fn handle_responsestart(
 		&mut self,
 		req_start: ReqResponseStart,
-		reply_to: Box<grease::ServiceUser<Service>>,
+		reply_to: grease::ServiceUserHandle<Service>,
 	) {
 		if self.get_conn_by_http_handle(&req_start.handle).is_some() {
 			let skt = {
@@ -564,7 +564,7 @@ where
 	fn handle_responsebody(
 		&mut self,
 		req_body: ReqResponseBody,
-		reply_to: Box<grease::ServiceUser<Service>>,
+		reply_to: grease::ServiceUserHandle<Service>,
 	) {
 		if self.get_conn_by_http_handle(&req_body.handle).is_some() {
 			let mut close_after = false;
@@ -891,7 +891,7 @@ mod test {
 	enum TestIncoming {
 		HttpCfm(Confirm),
 		HttpInd(Indication),
-		SocketReq(socket::Request, Box<grease::ServiceUser<socket::Service>>),
+		SocketReq(socket::Request, grease::ServiceUserHandle<socket::Service>),
 		SocketRsp(socket::Response),
 	}
 	struct TestHandle(mpsc::Sender<TestIncoming>);
@@ -915,7 +915,7 @@ mod test {
 		fn send_indication(&self, ind: Indication) {
 			self.0.send(TestIncoming::HttpInd(ind)).unwrap();
 		}
-		fn clone(&self) -> Box<grease::ServiceUser<Service>> {
+		fn clone(&self) -> grease::ServiceUserHandle<Service> {
 			Box::new(TestHandle(self.0.clone()))
 		}
 	}
@@ -947,7 +947,7 @@ mod test {
 		addr: &net::SocketAddr,
 		ctx: Context,
 		socket_handle: socket::ListenHandle,
-	) -> (ServerHandle, Box<grease::ServiceUser<socket::Service>>)
+	) -> (ServerHandle, grease::ServiceUserHandle<socket::Service>)
 	where
 		T: grease::ServiceProvider<Service>,
 	{
@@ -957,7 +957,7 @@ mod test {
 		};
 		http_north.send_request(bind_req.into(), this_thread);
 		let cfm = test_rx.recv_timeout(DEFAULT_TIMEOUT).unwrap();
-		let reply_to_copy: Box<grease::ServiceUser<socket::Service>>;
+		let reply_to_copy: grease::ServiceUserHandle<socket::Service>;
 		match cfm {
 			TestIncoming::SocketReq(socket::Request::Bind(ref x), ref reply_to) => {
 				assert_eq!(x.addr, *addr);
