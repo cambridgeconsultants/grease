@@ -63,17 +63,17 @@
 //! use std::sync::mpsc;
 //!
 //! mod foo {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! pub enum Request {}
@@ -81,8 +81,8 @@
 //! pub enum Indication {}
 //! pub enum Response {}
 //!
-//!	pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
-//!	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! pub type ServiceProviderHandle = grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
+//! pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //!
 //! enum Incoming {
 //!     FooServiceCfm(foo::Confirm),
@@ -95,41 +95,41 @@
 //!
 //! struct Handle(mpsc::Sender<Incoming>);
 //!
-//!	impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
-//!		fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-//!			self.0.send(Incoming::Request(msg, reply_to.clone())).unwrap();
-//!		}
-//!		fn send_response(&self, msg: Response) {
-//!			self.0.send(Incoming::Response(msg)).unwrap();
-//!		}
-//!		fn clone(&self) -> ServiceProviderHandle {
-//!			Box::new(Handle(self.0.clone()))
-//!		}
-//!	}
+//! impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
+//! 	fn send_request(&self, msg: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
+//! 		self.0.send(Incoming::Request(msg, reply_to.clone())).unwrap();
+//! 	}
+//! 	fn send_response(&self, msg: Response) {
+//! 		self.0.send(Incoming::Response(msg)).unwrap();
+//! 	}
+//! 	fn clone(&self) -> ServiceProviderHandle {
+//! 		Box::new(Handle(self.0.clone()))
+//! 	}
+//! }
 //!
-//!	impl grease::ServiceUser<foo::Confirm, foo::Indication> for Handle {
-//!		fn send_confirm(&self, msg: foo::Confirm) {
-//!			self.0.send(Incoming::FooServiceCfm(msg)).unwrap();
-//!		}
-//!		fn send_indication(&self, msg: foo::Indication) {
-//!			self.0.send(Incoming::FooServiceInd(msg)).unwrap();
-//!		}
-//!		fn clone(&self) -> foo::ServiceUserHandle {
-//!			Box::new(Handle(self.0.clone()))
-//!		}
-//!	}
+//! impl grease::ServiceUser<foo::Confirm, foo::Indication> for Handle {
+//! 	fn send_confirm(&self, msg: foo::Confirm) {
+//! 		self.0.send(Incoming::FooServiceCfm(msg)).unwrap();
+//! 	}
+//! 	fn send_indication(&self, msg: foo::Indication) {
+//! 		self.0.send(Incoming::FooServiceInd(msg)).unwrap();
+//! 	}
+//! 	fn clone(&self) -> foo::ServiceUserHandle {
+//! 		Box::new(Handle(self.0.clone()))
+//! 	}
+//! }
 //!
-//!	impl grease::ServiceUser<bar::Confirm, bar::Indication> for Handle {
-//!		fn send_confirm(&self, msg: bar::Confirm) {
-//!			self.0.send(Incoming::BarServiceCfm(msg)).unwrap();
-//!		}
-//!		fn send_indication(&self, msg: bar::Indication) {
-//!			self.0.send(Incoming::BarServiceInd(msg)).unwrap();
-//!		}
-//!		fn clone(&self) -> bar::ServiceUserHandle {
-//!			Box::new(Handle(self.0.clone()))
-//!		}
-//!	}
+//! impl grease::ServiceUser<bar::Confirm, bar::Indication> for Handle {
+//! 	fn send_confirm(&self, msg: bar::Confirm) {
+//! 		self.0.send(Incoming::BarServiceCfm(msg)).unwrap();
+//! 	}
+//! 	fn send_indication(&self, msg: bar::Indication) {
+//! 		self.0.send(Incoming::BarServiceInd(msg)).unwrap();
+//! 	}
+//! 	fn clone(&self) -> bar::ServiceUserHandle {
+//! 		Box::new(Handle(self.0.clone()))
+//! 	}
+//! }
 //!
 //! # fn main() { }
 //! ```
@@ -146,17 +146,17 @@
 //! use std::sync::mpsc;
 //!
 //! mod foo {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! pub enum Request {}
@@ -203,17 +203,17 @@
 //! use std::sync::mpsc;
 //!
 //! mod foo {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! mod bar {
-//!		use super::grease;
+//! 	use super::grease;
 //! 	pub enum Confirm {}
 //! 	pub enum Indication {}
-//!		pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
+//! 	pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
 //! }
 //!
 //! pub struct Handle(mpsc::Sender<Incoming>);
