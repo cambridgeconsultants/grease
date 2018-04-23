@@ -7,6 +7,7 @@
 // ****************************************************************************
 
 extern crate env_logger;
+#[macro_use]
 extern crate grease;
 extern crate grease_http as http;
 extern crate grease_socket as socket;
@@ -16,6 +17,7 @@ extern crate log;
 use std::sync::mpsc;
 use std::net;
 
+use grease::prelude::*;
 use grease::Context;
 
 // ****************************************************************************
@@ -32,29 +34,13 @@ use grease::Context;
 //
 // ****************************************************************************
 
-#[derive(Debug)]
-enum Incoming {
-	HttpConfirm(http::Confirm),
-	HttpIndication(http::Indication),
-}
+struct Handle(mpsc::Sender<Incoming>);
 
-struct Handle {
-	chan: mpsc::Sender<Incoming>,
-}
-
-impl grease::ServiceUser<http::Confirm, http::Indication> for Handle {
-	fn send_confirm(&self, cfm: http::Confirm) {
-		self.chan.send(Incoming::HttpConfirm(cfm)).unwrap();
-	}
-
-	fn send_indication(&self, ind: http::Indication) {
-		self.chan.send(Incoming::HttpIndication(ind)).unwrap();
-	}
-
-	fn clone(&self) -> http::ServiceUserHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
+app_map! {
+	generate: Incoming,
+	handle: Handle,
+	used: {
+		http: (Service, HttpCfm, HttpInd)
 	}
 }
 
@@ -81,9 +67,9 @@ fn main() {
 	info!("Running HTTP server on {}", bind_addr);
 
 	let socket_thread = socket::make_task();
-	let http_thread = http::make_task(socket_thread);
+	let http_thread = http::make_task(socket_thread.clone());
 	let (tx, rx) = mpsc::channel();
-	let handle = Handle { chan: tx };
+	let handle = Handle(tx);
 
 	http_thread.send_request(
 		http::ReqBind {
@@ -96,9 +82,8 @@ fn main() {
 	let mut n: Context = Context::default();
 
 	for msg in rx.iter() {
-		debug!("Rx: {:?}", msg);
 		match msg {
-			Incoming::HttpIndication(http::Indication::RxRequest(ind)) => {
+			Incoming::HttpInd(http::Indication::RxRequest(ind)) => {
 				let body_msg = format!("This is test {}\r\nYou used URL '{}'\r\n", n, ind.url);
 				info!("Got HTTP request {:?} {}", ind.method, ind.url);
 				let ctx = n.take();

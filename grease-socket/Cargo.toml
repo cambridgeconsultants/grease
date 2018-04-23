@@ -1,6 +1,6 @@
 [package]
 name = "grease-socket"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
 license-file = "../COPYRIGHT"
 
@@ -10,3 +10,6 @@ mio-more = "0.1.0"
 grease = { path = "../grease" }
 log = "0.4.1"
 rand = "0.4.2"
+
+[dev-dependencies]
+env_logger = "0.5.6"

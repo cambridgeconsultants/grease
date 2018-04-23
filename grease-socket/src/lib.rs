@@ -2,7 +2,7 @@
 //!
 //! Copyright (c) Cambridge Consultants 2018
 //! See the top-level COPYRIGHT file for further information and licensing
-//! 
+//!
 //! The grease socket task makes handling sockets easier. A user requests the
 //! socket task opens a new socket and it does so (if possible). The user then
 //! receives asynchronous indications when data arrives on the socket and/or
@@ -39,6 +39,16 @@ use grease::Context;
 // Public Messages
 //
 // ****************************************************************************
+
+/// Offers the `grease::Service` for this module.
+pub struct Service;
+
+impl grease::Service for Service {
+	type Request = Request;
+	type Confirm = Confirm;
+	type Indication = Indication;
+	type Response = Response;
+}
 
 /// Requests that can be sent to the Socket task
 #[derive(Debug)]
@@ -205,19 +215,9 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
-/// Users can use this to send us messages.
-pub type ServiceProviderHandle =
-	grease::ServiceProviderHandle<Request, Confirm, Indication, Response>;
-
-/// A `socket` specific wrapper around `grease::ServiceUserHandle`. We use this to
-/// talk to our users.
-pub type ServiceUserHandle = grease::ServiceUserHandle<Confirm, Indication>;
-
 /// Represents something a socket service user can hold on to to send us
 /// message.
-pub struct Handle {
-	chan: mio_more::channel::Sender<Incoming>,
-}
+pub struct Handle(mio_more::channel::Sender<Incoming>);
 
 /// Uniquely identifies an listening socket
 pub type ListenHandle = Context;
@@ -254,18 +254,17 @@ pub enum ConnectionType {
 //
 // ****************************************************************************
 
-/// The set of all messages that this task can receive.
-enum Incoming {
-	/// One of our own requests that has come in
-	Request(Request, ServiceUserHandle),
-	/// One of our own responses that has come in
-	Response(Response),
+service_map! {
+	generate: Incoming,
+	service: Service,
+	handle: Handle,
+	used: { }
 }
 
 /// Created for every bound (i.e. listening) socket
 struct ListenSocket {
 	handle: ListenHandle,
-	ind_to: ServiceUserHandle,
+	ind_to: grease::ServiceUserHandle<Service>,
 	listener: mio::tcp::TcpListener,
 }
 
@@ -274,13 +273,13 @@ struct PendingWrite {
 	context: Context,
 	sent: usize,
 	data: Vec<u8>,
-	reply_to: ServiceUserHandle,
+	reply_to: grease::ServiceUserHandle<Service>,
 }
 
 /// Created for every connection receieved on a ListenSocket
 struct ConnectedSocket {
 	// parent: ListenHandle,
-	ind_to: ServiceUserHandle,
+	ind_to: grease::ServiceUserHandle<Service>,
 	handle: ConnHandle,
 	connection: mio::tcp::TcpStream,
 	/// There's a read the user hasn't process yet
@@ -328,7 +327,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> ServiceProviderHandle {
+pub fn make_task() -> Handle {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
@@ -336,7 +335,7 @@ pub fn make_task() -> ServiceProviderHandle {
 			task_context.poll();
 		}
 	});
-	Box::new(Handle { chan: mio_tx })
+	Handle(mio_tx)
 }
 
 // ****************************************************************************
@@ -570,7 +569,11 @@ impl TaskContext {
 	}
 
 	/// Handle requests
-	pub fn handle_socket_req(&mut self, req: Request, reply_to: ServiceUserHandle) {
+	pub fn handle_socket_req(
+		&mut self,
+		req: Request,
+		reply_to: grease::ServiceUserHandle<Service>,
+	) {
 		match req {
 			Request::Bind(x) => self.handle_bind(x, reply_to),
 			Request::Close(x) => self.handle_close(x, reply_to),
@@ -579,14 +582,18 @@ impl TaskContext {
 	}
 
 	/// Open a new socket with the given parameters.
-	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
+	fn handle_bind(&mut self, req_bind: ReqBind, reply_to: grease::ServiceUserHandle<Service>) {
 		info!("Binding {:?} on {}...", req_bind.conn_type, req_bind.addr);
 		match req_bind.conn_type {
 			ConnectionType::Stream => self.handle_stream_bind(req_bind, reply_to),
 		}
 	}
 
-	fn handle_stream_bind(&mut self, req_bind: ReqBind, reply_to: ServiceUserHandle) {
+	fn handle_stream_bind(
+		&mut self,
+		req_bind: ReqBind,
+		reply_to: grease::ServiceUserHandle<Service>,
+	) {
 		let cfm = match mio::tcp::TcpListener::bind(&req_bind.addr) {
 			Ok(server) => {
 				let h = self.next_handle.take();
@@ -626,7 +633,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqClose
-	fn handle_close(&mut self, req_close: ReqClose, reply_to: ServiceUserHandle) {
+	fn handle_close(&mut self, req_close: ReqClose, reply_to: grease::ServiceUserHandle<Service>) {
 		let mut found = false;
 		if let Some(_) = self.connections.remove(&req_close.handle) {
 			// Connection closes automatically??
@@ -645,7 +652,7 @@ impl TaskContext {
 	}
 
 	/// Handle a ReqSend
-	fn handle_send(&mut self, req_send: ReqSend, reply_to: ServiceUserHandle) {
+	fn handle_send(&mut self, req_send: ReqSend, reply_to: grease::ServiceUserHandle<Service>) {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
@@ -735,24 +742,6 @@ impl TaskContext {
 	}
 }
 
-impl grease::ServiceProvider<Request, Confirm, Indication, Response> for Handle {
-	fn send_request(&self, req: Request, reply_to: &grease::ServiceUser<Confirm, Indication>) {
-		self.chan
-			.send(Incoming::Request(req, reply_to.clone()))
-			.unwrap();
-	}
-
-	fn send_response(&self, rsp: Response) {
-		self.chan.send(Incoming::Response(rsp)).unwrap();
-	}
-
-	fn clone(&self) -> ServiceProviderHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
-	}
-}
-
 impl Drop for ConnectedSocket {
 	fn drop(&mut self) {
 		for pw in self.pending_writes.iter() {
@@ -804,6 +793,7 @@ mod test {
 	use std::sync::mpsc;
 	use std::sync::atomic;
 	use rand::Rng;
+	use grease::prelude::*;
 	use super::*;
 
 	enum TestIncoming {
@@ -824,14 +814,14 @@ mod test {
 		)
 	}
 
-	impl grease::ServiceUser<Confirm, Indication> for TestHandle {
+	impl grease::ServiceUser<Service> for TestHandle {
 		fn send_confirm(&self, cfm: Confirm) {
 			self.0.send(TestIncoming::SocketCfm(cfm)).unwrap();
 		}
 		fn send_indication(&self, ind: Indication) {
 			self.0.send(TestIncoming::SocketInd(ind)).unwrap();
 		}
-		fn clone(&self) -> ServiceUserHandle {
+		fn clone(&self) -> grease::ServiceUserHandle<Service> {
 			Box::new(TestHandle(self.0.clone()))
 		}
 	}

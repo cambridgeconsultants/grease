@@ -3,5 +3,6 @@ Cargo.lock
 *.bk
 README.html
 *.sublime-workspace
+.vs
 
 

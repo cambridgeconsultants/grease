@@ -7,6 +7,7 @@
 // ****************************************************************************
 
 extern crate env_logger;
+#[macro_use]
 extern crate grease;
 extern crate grease_socket as socket;
 #[macro_use]
@@ -15,6 +16,7 @@ extern crate log;
 use std::net;
 use std::sync::mpsc;
 
+use grease::prelude::*;
 use grease::Context;
 
 // ****************************************************************************
@@ -31,28 +33,13 @@ use grease::Context;
 //
 // ****************************************************************************
 
-enum Incoming {
-	SocketConfirm(socket::Confirm),
-	SocketIndication(socket::Indication),
-}
+struct Handle(mpsc::Sender<Incoming>);
 
-struct Handle {
-	chan: mpsc::Sender<Incoming>,
-}
-
-impl grease::ServiceUser<socket::Confirm, socket::Indication> for Handle {
-	fn send_confirm(&self, cfm: socket::Confirm) {
-		self.chan.send(Incoming::SocketConfirm(cfm)).unwrap();
-	}
-
-	fn send_indication(&self, ind: socket::Indication) {
-		self.chan.send(Incoming::SocketIndication(ind)).unwrap();
-	}
-
-	fn clone(&self) -> socket::ServiceUserHandle {
-		Box::new(Handle {
-			chan: self.chan.clone(),
-		})
+app_map! {
+	generate: Incoming,
+	handle: Handle,
+	used: {
+		socket: (Service, SocketCfm, SocketInd)
 	}
 }
 
@@ -80,7 +67,7 @@ fn main() {
 
 	let socket_task = socket::make_task();
 	let (tx, rx) = mpsc::channel();
-	let handle = Handle { chan: tx };
+	let handle = Handle(tx);
 
 	socket_task.send_request(
 		socket::ReqBind {
@@ -95,7 +82,7 @@ fn main() {
 
 	for msg in rx.iter() {
 		match msg {
-			Incoming::SocketIndication(socket::Indication::Received(ind)) => {
+			Incoming::SocketInd(socket::Indication::Received(ind)) => {
 				socket_task.send_response(socket::RspReceived { handle: ind.handle }.into());
 				info!("Echoing {} bytes of input", ind.data.len());
 				socket_task.send_request(
@@ -107,13 +94,13 @@ fn main() {
 					&handle,
 				);
 			}
-			Incoming::SocketIndication(socket::Indication::Connected(ind)) => {
+			Incoming::SocketInd(socket::Indication::Connected(ind)) => {
 				info!(
 					"Got connection from {}, handle = {}",
 					ind.peer, ind.conn_handle
 				);
 			}
-			Incoming::SocketIndication(socket::Indication::Dropped(ind)) => {
+			Incoming::SocketInd(socket::Indication::Dropped(ind)) => {
 				info!("Connection dropped, handle = {}", ind.handle);
 			}
 			_ => {}
