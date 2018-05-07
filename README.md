@@ -17,46 +17,46 @@ Protocol stacks are in built layers. In such a layered system, consider two laye
 Here's an example using HTTP over TCP/IP over Ethernet:
 
 ```
-+-------------------+                                       +-------------------+
-|                   |             Web Pages                 |                   |
-| Web Browser       | <= = = = = = = = = = = = = = = = = => | Web Server        |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
-    |           ^                                               |           ^
-    v           |                                               v           |
-+-------------------+                                       +-------------------+
-|                   |        HTTP Requests/Responses        |                   |
-| HTTP              | <= = = = = = = = = = = = = = = = = => | HTTP              |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
-    |           ^                                               |           ^
-    v           |                                               v           |
-+-------------------+                                       +-------------------+
-|                   |             TCP Stream                |                   |
-| TCP               | <= = = = = = = = = = = = = = = = = => | TCP               |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
-    |           ^                                               |           ^
-    v           |                                               v           |
-+-------------------+                                       +-------------------+
-|                   |             IP Packets                |                   |
-| IP                | <= = = = = = = = = = = = = = = = = => | IP                |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
-    |           ^                                               |           ^
-    v           |                                               v           |
-+-------------------+                                       +-------------------+
-|                   |           Ethernet frames             |                   |
-| Ethernet MAC      | <= = = = = = = = = = = = = = = = = => | Ethernet MAC      |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
-    |           ^                                               |           ^
-    v           |                                               v           |
-+-------------------+                                       +-------------------+
-|                   |          Twisted pair cable           |                   |
-| Ethernet PHY      | <==================================>  | Ethernet PHY      |
-|                   |                                       |                   |
-+-------------------+                                       +-------------------+
++-------------------+                                     +-------------------+
+|                   |              Web Pages              |                   |
+| Web Browser       | <= = = = = = = = = = = = = = = = => | Web Server        |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
+    |           ^                                             |           ^
+    v           |                                             v           |
++-------------------+                                     +-------------------+
+|                   |       HTTP Requests/Responses       |                   |
+| HTTP              | <= = = = = = = = = = = = = = = = => | HTTP              |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
+    |           ^                                             |           ^
+    v           |                                             v           |
++-------------------+                                     +-------------------+
+|                   |             TCP Stream              |                   |
+| TCP               | <= = = = = = = = = = = = = = = = => | TCP               |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
+    |           ^                                             |           ^
+    v           |                                             v           |
++-------------------+                                     +-------------------+
+|                   |             IP Packets              |                   |
+| IP                | <= = = = = = = = = = = = = = = = => | IP                |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
+    |           ^                                             |           ^
+    v           |                                             v           |
++-------------------+                                     +-------------------+
+|                   |           Ethernet frames           |                   |
+| Ethernet MAC      | <= = = = = = = = = = = = = = = = => | Ethernet MAC      |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
+    |           ^                                             |           ^
+    v           |                                             v           |
++-------------------+                                     +-------------------+
+|                   |          Twisted pair cable         |                   |
+| Ethernet PHY      | <================================>  | Ethernet PHY      |
+|                   |                                     |                   |
++-------------------+                                     +-------------------+
 ```
 
 If we take the top two layers, what the Web Browsers wants is a page from the Web Server. It does this, by sending a request in to the HTTP layer which effectively says 'GET this page from this server'. The HTTP layer wants to send a 'GET' request to the matching HTTP layer on the other side, so it uses the TCP layer to open a streaming socket and sends the GET request down the stream as ASCII text. The TCP layer segments the stream and passes the segments to the IP layer. The IP layer wraps each segments in an IP packet and passes the packets to the Ethernet MAC. The MAC wraps the packets with an Ethernet header containing a MAC address, and passes the resulting frames to the PHY. The PHY then encodes the Ethernet frame into a physical medium. On the receiving side, each layer will *indicate* to the layer above that some data has been received. In the case of TCP, several IP packets may need to be transferred back and forth before the payload from a TCP segment is ready to be passed up. At the top, the Web Server is told that a web page is required, so it obtains the appropriate page (quite like using a protocol stack), and then transmits the response back down the stack.
