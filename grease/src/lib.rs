@@ -280,6 +280,11 @@
 //! # fn main() { }
 //! ```
 
+#![cfg_attr(feature = "cargo-clippy", warn(clippy_pedantic))]
+#![cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
+#![cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
+#![cfg_attr(feature = "cargo-clippy", allow(if_not_else))]
+
 // ****************************************************************************
 //
 // Macros
@@ -506,7 +511,7 @@ pub struct ReplyContext<T> {
 // ****************************************************************************
 
 impl Context {
-	pub fn new(value: usize) -> Context {
+	pub fn new(value: usize) -> Self {
 		Context(value)
 	}
 
@@ -516,7 +521,7 @@ impl Context {
 
 	/// You can use take to grab a copy of the current value,
 	/// while incrementing it ready for the next use.
-	pub fn take(&mut self) -> Context {
+	pub fn take(&mut self) -> Self {
 		let result = Context(self.0);
 		self.0 = self.0.wrapping_add(1);
 		result
@@ -524,7 +529,7 @@ impl Context {
 }
 
 impl Default for Context {
-	fn default() -> Context {
+	fn default() -> Self {
 		Context(0)
 	}
 }

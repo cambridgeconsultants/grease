@@ -8,6 +8,11 @@
 //! receives asynchronous indications when data arrives on the socket and/or
 //! when the socket closes.
 
+#![cfg_attr(feature = "cargo-clippy", warn(clippy_pedantic))]
+#![cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
+#![cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
+#![cfg_attr(feature = "cargo-clippy", allow(if_not_else))]
+
 #[macro_use]
 extern crate grease;
 #[macro_use]
@@ -139,7 +144,7 @@ pub struct ReqSend {
 	pub data: Vec<u8>,
 }
 
-/// Reply to a ReqBind.
+/// Reply to a `ReqBind`.
 #[derive(Debug)]
 pub struct CfmBind {
 	/// Either a new ListenHandle or an error
@@ -148,7 +153,7 @@ pub struct CfmBind {
 	pub context: Context,
 }
 
-/// Reply to a ReqClose. Will flush out all
+/// Reply to a `ReqClose`. Will flush out all
 /// existing data.
 #[derive(Debug)]
 pub struct CfmClose {
@@ -160,7 +165,7 @@ pub struct CfmClose {
 	pub context: Context,
 }
 
-/// Reply to a ReqSend. The data has not necessarily
+/// Reply to a `ReqSend`. The data has not necessarily
 /// been sent, but it is safe to send some more data.
 #[derive(Debug)]
 pub struct CfmSend {
@@ -192,8 +197,8 @@ pub struct IndDropped {
 
 /// Indicates that data has arrived on the socket
 /// No further data will be sent on this handle until
-/// RspReceived is sent back. Note that this type
-/// has a custom std::fmt::Debug implementation so it
+/// `RspReceived` is sent back. Note that this type
+/// has a custom `std::fmt::Debug` implementation so it
 /// doesn't print the (lengthy) contents of `data`.
 pub struct IndReceived {
 	/// The handle for the socket data came in on
@@ -276,7 +281,7 @@ struct PendingWrite {
 	reply_to: grease::ServiceUserHandle<Service>,
 }
 
-/// Created for every connection receieved on a ListenSocket
+/// Created for every connection receieved on a `ListenSocket`
 struct ConnectedSocket {
 	// parent: ListenHandle,
 	ind_to: grease::ServiceUserHandle<Service>,
@@ -364,13 +369,9 @@ impl TaskContext {
 		let handle = Context::new(token.0);
 		if ready.is_readable() {
 			if token == MESSAGE_TOKEN {
-				loop {
-					// Empty the whole message queue
-					if let Ok(msg) = self.mio_rx.try_recv() {
-						self.handle_message(msg);
-					} else {
-						break;
-					}
+				// Empty the whole message queue
+				while let Ok(msg) = self.mio_rx.try_recv() {
+					self.handle_message(msg);
 				}
 			} else if self.listeners.contains_key(&handle) {
 				debug!("Readable listen socket {}?", handle);
@@ -414,12 +415,12 @@ impl TaskContext {
 	}
 
 	/// Init the context
-	pub fn new(mio_rx: mio_more::channel::Receiver<Incoming>) -> TaskContext {
-		let t = TaskContext {
+	pub fn new(mio_rx: mio_more::channel::Receiver<Incoming>) -> Self {
+		let t = Self {
 			listeners: HashMap::new(),
 			connections: HashMap::new(),
 			next_handle: Context::new(MESSAGE_TOKEN.0 + 1),
-			mio_rx: mio_rx,
+			mio_rx,
 			poll: mio::Poll::new().unwrap(),
 		};
 		t.poll
@@ -437,7 +438,7 @@ impl TaskContext {
 	/// with a IndConnected
 	fn accept_new_connection(&mut self, ls_handle: ListenHandle) {
 		// We know this exists because we checked it before we got here
-		let ls = self.listeners.get(&ls_handle).unwrap();
+		let ls = &self.listeners[&ls_handle];
 		if let Ok((stream, conn_addr)) = ls.listener.accept() {
 			let cs = ConnectedSocket {
 				// parent: ls.handle,
@@ -471,47 +472,43 @@ impl TaskContext {
 	fn pending_writes(&mut self, cs_handle: ConnHandle) {
 		// We know this exists because we checked it before we got here
 		let cs = self.connections.get_mut(&cs_handle).unwrap();
-		loop {
-			if let Some(mut pw) = cs.pending_writes.pop_front() {
-				let to_send = pw.data.len() - pw.sent;
-				match cs.connection.write(&pw.data[pw.sent..]) {
-					Ok(len) if len < to_send => {
-						let left = to_send - len;
-						debug!(
-							"Sent {} of {} pending, leaving {} on handle: {}",
-							len, to_send, left, cs.handle
-						);
-						pw.sent = pw.sent + len;
-						cs.pending_writes.push_front(pw);
-						// No cfm here - we wait some more
-						break;
-					}
-					Ok(_) => {
-						debug!("Sent all {} pending on handle: {}", to_send, cs.handle);
-						pw.sent = pw.sent + to_send;
-						let cfm = CfmSend {
-							handle: cs.handle,
-							context: pw.context,
-							result: Ok(pw.sent),
-						};
-						pw.reply_to.send_confirm(Confirm::Send(cfm));
-					}
-					Err(err) => {
-						warn!(
-							"Send error on handle: {} (pending), err: {}",
-							cs.handle, err
-						);
-						let cfm = CfmSend {
-							handle: cs.handle,
-							context: pw.context,
-							result: Err(err.into()),
-						};
-						pw.reply_to.send_confirm(Confirm::Send(cfm));
-						break;
-					}
+		while let Some(mut pw) = cs.pending_writes.pop_front() {
+			let to_send = pw.data.len() - pw.sent;
+			match cs.connection.write(&pw.data[pw.sent..]) {
+				Ok(len) if len < to_send => {
+					let left = to_send - len;
+					debug!(
+						"Sent {} of {} pending, leaving {} on handle: {}",
+						len, to_send, left, cs.handle
+					);
+					pw.sent += len;
+					cs.pending_writes.push_front(pw);
+					// No cfm here - we wait some more
+					break;
 				}
-			} else {
-				break;
+				Ok(_) => {
+					debug!("Sent all {} pending on handle: {}", to_send, cs.handle);
+					pw.sent += to_send;
+					let cfm = CfmSend {
+						handle: cs.handle,
+						context: pw.context,
+						result: Ok(pw.sent),
+					};
+					pw.reply_to.send_confirm(Confirm::Send(cfm));
+				}
+				Err(err) => {
+					warn!(
+						"Send error on handle: {} (pending), err: {}",
+						cs.handle, err
+					);
+					let cfm = CfmSend {
+						handle: cs.handle,
+						context: pw.context,
+						result: Err(err.into()),
+					};
+					pw.reply_to.send_confirm(Confirm::Send(cfm));
+					break;
+				}
 			}
 		}
 	}
@@ -526,7 +523,7 @@ impl TaskContext {
 			// Only pass up one indication at a time
 			if !cs.outstanding {
 				// Cap the max amount we will read
-				let mut buffer = vec![0u8; MAX_READ_LEN];
+				let mut buffer = vec![0_u8; MAX_READ_LEN];
 				match cs.connection.read(buffer.as_mut_slice()) {
 					Ok(0) => {
 						debug!("Read nothing on handle: {}", cs_handle);
@@ -634,11 +631,8 @@ impl TaskContext {
 
 	/// Handle a ReqClose
 	fn handle_close(&mut self, req_close: ReqClose, reply_to: grease::ServiceUserHandle<Service>) {
-		let mut found = false;
-		if let Some(_) = self.connections.remove(&req_close.handle) {
-			// Connection closes automatically??
-			found = true;
-		}
+		let found = self.connections.remove(&req_close.handle).is_some();
+
 		let cfm = CfmClose {
 			result: if found {
 				Ok(())
@@ -656,7 +650,7 @@ impl TaskContext {
 		if let Some(cs) = self.connections.get_mut(&req_send.handle) {
 			let to_send = req_send.data.len();
 			// Let's see how much we can get rid off right now
-			if cs.pending_writes.len() > 0 {
+			if !cs.pending_writes.is_empty() {
 				debug!(
 					"Storing write len {} on handle: {}",
 					to_send, req_send.handle
@@ -665,7 +659,7 @@ impl TaskContext {
 					sent: 0,
 					context: req_send.context,
 					data: req_send.data,
-					reply_to: reply_to,
+					reply_to,
 				};
 				cs.pending_writes.push_back(pw);
 			// No cfm here - we wait
@@ -681,7 +675,7 @@ impl TaskContext {
 							sent: len,
 							context: req_send.context,
 							data: req_send.data,
-							reply_to: reply_to,
+							reply_to,
 						};
 						cs.pending_writes.push_back(pw);
 						// No cfm here - we wait
@@ -744,7 +738,7 @@ impl TaskContext {
 
 impl Drop for ConnectedSocket {
 	fn drop(&mut self) {
-		for pw in self.pending_writes.iter() {
+		for pw in &self.pending_writes {
 			let cfm = CfmSend {
 				handle: self.handle,
 				context: pw.context,
@@ -779,9 +773,9 @@ impl fmt::Debug for ReqSend {
 	}
 }
 
-/// Wrap io::Errors into SocketErrors easily
+/// Wrap `io::Errors` into `SocketErrors` easily
 impl From<io::Error> for SocketError {
-	fn from(e: io::Error) -> SocketError {
+	fn from(e: io::Error) -> Self {
 		SocketError::IOError(e.kind())
 	}
 }
@@ -791,7 +785,6 @@ mod test {
 	use super::*;
 	use grease::prelude::*;
 	use rand::Rng;
-	use std::io::prelude::*;
 	use std::net;
 	use std::sync::atomic;
 	use std::sync::mpsc;
