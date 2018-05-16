@@ -403,7 +403,7 @@ macro_rules! impl_user {
 				::std::boxed::Box::new($handle_type(::std::clone::Clone::clone(&self.0)))
 			}
 		}
-	}
+	};
 }
 
 #[macro_export]

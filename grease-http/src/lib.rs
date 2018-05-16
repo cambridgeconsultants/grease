@@ -872,10 +872,10 @@ impl TaskContext {
 
 #[cfg(test)]
 mod test {
-	use std::net;
-	use std::sync::mpsc;
-	use std::sync::atomic;
 	use super::*;
+	use std::net;
+	use std::sync::atomic;
+	use std::sync::mpsc;
 
 	use grease::prelude::*;
 

@@ -27,8 +27,8 @@ extern crate rand;
 use std::collections::{HashMap, VecDeque};
 use std::convert::From;
 use std::fmt;
-use std::io::prelude::*;
 use std::io;
+use std::io::prelude::*;
 use std::net;
 use std::thread;
 
@@ -788,13 +788,13 @@ impl From<io::Error> for SocketError {
 
 #[cfg(test)]
 mod test {
+	use super::*;
+	use grease::prelude::*;
+	use rand::Rng;
 	use std::io::prelude::*;
 	use std::net;
-	use std::sync::mpsc;
 	use std::sync::atomic;
-	use rand::Rng;
-	use grease::prelude::*;
-	use super::*;
+	use std::sync::mpsc;
 
 	enum TestIncoming {
 		SocketCfm(Confirm),
