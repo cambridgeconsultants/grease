@@ -183,8 +183,12 @@ The goal is to develop tasks which each implement a well-defined layer of functi
 
 Each layer implements `Request`, `Confirm`, `Indication` and `Response` enum types containing the messages for the service it provides. Rather than enforce a strict naming convention for these four messages, we instead only insist on a layer offering a single struct which then has the four messages types as Associated Types:
 
-```
+```rust,skt-grease
 struct Service;
+enum RequestMessage { FooReq }
+enum ConfirmMessage { FooCfm }
+enum Indications { BarInd }
+
 impl grease::Service for Service {
   type Request = RequestMessage;
   type Confirm = ConfirmMessage;

@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
 readme = "README.md"
 license-file = "COPYRIGHT"
+build = "build.rs"
 
 [workspace]
 members = [
@@ -11,3 +12,9 @@ members = [
 	"grease-socket",
 	"grease-http",
 ]
+
+[build-dependencies]
+skeptic = "0.13"
+
+[dev-dependencies]
+skeptic = "0.13"
