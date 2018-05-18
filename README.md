@@ -1,5 +1,7 @@
 # Grease: A multi-threaded message-passing approach to writing protocol stacks in Rust
 
+[![Build Status](https://travis-ci.org/cambridgeconsultants/grease.svg?branch=master)](https://travis-ci.org/cambridgeconsultants/grease)
+
 ## Introduction
 
 Grease is designed to facilitate a message-passing based approach to protocol stack development. Message passing between tasks, as opposed to function-call based protocol stacks, has a number of advantages:
