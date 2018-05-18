@@ -14,8 +14,8 @@ extern crate grease_socket as socket;
 #[macro_use]
 extern crate log;
 
-use std::sync::mpsc;
 use std::net;
+use std::sync::mpsc;
 
 use grease::prelude::*;
 use grease::Context;

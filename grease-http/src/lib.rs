@@ -34,8 +34,13 @@
 //! the data anyway, using flow control properly saves memory - especially
 //! when sending large bodies.
 //!
-//! TODO: We need to support an IndBody / RspBody at some point, so that
+//! TODO: We need to support an `IndBody` / `RspBody` at some point, so that
 //! POST and PUT will actually work.
+
+#![cfg_attr(feature = "cargo-clippy", warn(clippy_pedantic))]
+#![cfg_attr(feature = "cargo-clippy", allow(needless_pass_by_value))]
+#![cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
+#![cfg_attr(feature = "cargo-clippy", allow(if_not_else))]
 
 // ****************************************************************************
 //
@@ -75,7 +80,7 @@ impl grease::Service for Service {
 	type Request = Request;
 	type Confirm = Confirm;
 	type Indication = Indication;
-	type Response = Response;
+	type Response = ();
 }
 
 /// Requests that can be sent to the http task.
@@ -120,9 +125,6 @@ pub enum Indication {
 make_wrapper!(IndRxRequest, Indication, Indication::RxRequest);
 make_wrapper!(IndClosed, Indication, Indication::Closed);
 
-#[derive(Debug)]
-pub enum Response {}
-
 /// A bind request - start an HTTP server on a given port.
 #[derive(Debug)]
 pub struct ReqBind {
@@ -136,9 +138,9 @@ pub struct ReqBind {
 /// and Content-Type are automatically added from the relevant fields
 /// but you can add arbitrary other headers in the header vector.
 ///
-/// Send zero or more ReqResponseBody to fulfill the length specified.
-/// (Wait for CfmResponseBody between each one as the link might be slow).
-/// If unbounded length, send an empty ReqResponseBody to finish so we
+/// Send zero or more `ReqResponseBody` to fulfill the length specified.
+/// (Wait for `CfmResponseBody` between each one as the link might be slow).
+/// If unbounded length, send an empty `ReqResponseBody` to finish so we
 /// know to close the connection.
 #[derive(Debug)]
 pub struct ReqResponseStart {
@@ -158,7 +160,7 @@ pub struct ReqResponseStart {
 }
 
 /// Send some body content for an HTTP response. Must be proceeded
-/// by ReqResponseStart to send the headers.
+/// by `ReqResponseStart` to send the headers.
 #[derive(Debug)]
 pub struct ReqResponseBody {
 	/// Which HTTP connection to send some response body on
@@ -169,14 +171,14 @@ pub struct ReqResponseBody {
 	pub data: Vec<u8>,
 }
 
-/// Whether the ReqBind was successfull
+/// Whether the `ReqBind` was successfull
 #[derive(Debug)]
 pub struct CfmBind {
 	pub context: Context,
 	pub result: Result<ServerHandle, Error>,
 }
 
-/// Whether the ReqResponseStart was successfull
+/// Whether the `ReqResponseStart` was successfull
 #[derive(Debug)]
 pub struct CfmResponseStart {
 	pub handle: ConnHandle,
@@ -184,7 +186,7 @@ pub struct CfmResponseStart {
 	pub result: Result<(), Error>,
 }
 
-/// Confirms a ReqResponseBody has been sent
+/// Confirms a `ReqResponseBody` has been sent
 #[derive(Debug)]
 pub struct CfmResponseBody {
 	pub handle: ConnHandle,
@@ -233,7 +235,7 @@ pub enum Error {
 	/// closed) ConnHandle
 	BadHandle,
 	/// Socket bind failed,
-	SocketError(socket::SocketError),
+	Socket(socket::SocketError),
 }
 
 // ****************************************************************************
@@ -266,7 +268,7 @@ enum CfmType {
 }
 
 /// If we get a Request from above and consequently need to wait
-/// for a Cfm from the socket task, use a PendingCfm to store
+/// for a Cfm from the socket task, use a `PendingCfm` to store
 /// the details you'll need when the Cfm eventually arrives.
 struct PendingCfm {
 	reply_to: grease::ServiceUserHandle<Service>,
@@ -350,12 +352,12 @@ pub fn make_task(socket: grease::ServiceProviderHandle<socket::Service>) -> Hand
 //
 // ****************************************************************************
 
-/// All our handler functions are methods on this TaskContext structure.
+/// All our handler functions are methods on this `TaskContext` structure.
 impl TaskContext {
 	/// Create a new TaskContext
-	fn new(socket: grease::ServiceProviderHandle<socket::Service>, us: Handle) -> TaskContext {
-		TaskContext {
-			socket: socket,
+	fn new(socket: grease::ServiceProviderHandle<socket::Service>, us: Handle) -> Self {
+		Self {
+			socket,
 			servers: MultiMap::new(),
 			connections: MultiMap::new(),
 			reply_to: us,
@@ -502,7 +504,7 @@ impl TaskContext {
 			s.push_str(&format!("{}: {}\r\n", k.as_str(), v.to_str().unwrap()));
 		}
 		s.push_str("\r\n");
-		return s;
+		s
 	}
 
 	/// @todo We should we check they call this once and only once.
@@ -597,7 +599,7 @@ impl TaskContext {
 				}
 			};
 
-			if req_body.data.len() > 0 {
+			if !req_body.data.is_empty() {
 				// Send to the socket server
 				// Send the cfm when the socket server has sent this data
 				let req = socket::ReqSend {
@@ -610,7 +612,7 @@ impl TaskContext {
 					context: req_body.context,
 					reply_to: reply_to.clone(),
 					cfm_type: CfmType::Body,
-					close_after: close_after,
+					close_after,
 				};
 				self.pending.insert(req.context, pend);
 				self.socket.send_request(req.into(), &self.reply_to);
@@ -647,7 +649,7 @@ impl TaskContext {
 		let mut r = rushttp::response::HttpResponse::new_with_body(code, "HTTP/1.0", message);
 		r.add_header("Content-Type", "text/plain");
 		let mut output = Vec::new();
-		if let Ok(_) = r.write(&mut output) {
+		if r.write(&mut output).is_ok() {
 			self.socket.send_request(
 				socket::ReqSend {
 					handle: *handle,
@@ -672,7 +674,7 @@ impl TaskContext {
 	fn map_result<T>(result: Result<T, socket::SocketError>) -> Result<(), Error> {
 		match result {
 			Ok(_) => Ok(()),
-			Err(e) => Err(Error::SocketError(e)),
+			Err(e) => Err(Error::Socket(e)),
 		}
 	}
 
@@ -699,7 +701,7 @@ impl TaskContext {
 					reply_ctx.reply_to.send_confirm(
 						CfmBind {
 							context: reply_ctx.context,
-							result: Err(Error::SocketError(*err)),
+							result: Err(Error::Socket(*err)),
 						}.into(),
 					);
 				}
@@ -798,7 +800,7 @@ impl TaskContext {
 		if let Some(server_handle) = self.get_server_handle_by_socket_handle(&ind.listen_handle) {
 			let conn = Connection {
 				our_handle: self.next_ctx.take(),
-				server_handle: server_handle,
+				server_handle,
 				socket_handle: ind.conn_handle,
 				parser: rushttp::request::Parser::new(),
 				body_length: None,
@@ -872,10 +874,10 @@ impl TaskContext {
 
 #[cfg(test)]
 mod test {
-	use std::net;
-	use std::sync::mpsc;
-	use std::sync::atomic;
 	use super::*;
+	use std::net;
+	use std::sync::atomic;
+	use std::sync::mpsc;
 
 	use grease::prelude::*;
 
