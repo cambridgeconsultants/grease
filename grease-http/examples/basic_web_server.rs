@@ -17,8 +17,8 @@ extern crate log;
 use std::net;
 use std::sync::mpsc;
 
-use grease::prelude::*;
 use grease::Context;
+use grease::prelude::*;
 
 // ****************************************************************************
 //

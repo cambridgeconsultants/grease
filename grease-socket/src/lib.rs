@@ -220,10 +220,6 @@ pub struct RspReceived {
 //
 // ****************************************************************************
 
-/// Represents something a socket service user can hold on to to send us
-/// message.
-pub struct Handle(mio_more::channel::Sender<Incoming>);
-
 /// Uniquely identifies an listening socket
 pub type ListenHandle = Context;
 
@@ -258,6 +254,10 @@ pub enum ConnectionType {
 // Private Types
 //
 // ****************************************************************************
+
+/// Represents something a socket service user can hold on to to send us
+/// message.
+struct Handle(mio_more::channel::Sender<Incoming>);
 
 service_map! {
 	generate: Incoming,
@@ -332,7 +332,7 @@ const MESSAGE_TOKEN: mio::Token = mio::Token(0);
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task() -> Handle {
+pub fn make_task() -> impl grease::ServiceProvider<Service> {
 	let (mio_tx, mio_rx) = mio_more::channel::channel();
 	thread::spawn(move || {
 		let mut task_context = TaskContext::new(mio_rx);
