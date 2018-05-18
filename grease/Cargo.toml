@@ -1,7 +1,10 @@
 [package]
 name = "grease"
-version = "0.5.1"
-authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
+version = "0.5.2"
+authors = [
+	"Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>",
+	"David Wood <david.wood@cambridgeconsultants.com>",
+]
 license-file = "../COPYRIGHT"
 
 [dependencies]

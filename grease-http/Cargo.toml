@@ -1,7 +1,10 @@
 [package]
 name = "grease-http"
-version = "0.2.0"
-authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
+version = "0.2.1"
+authors = [
+	"Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>",
+	"David Wood <david.wood@cambridgeconsultants.com>",
+]
 license-file = "../COPYRIGHT"
 
 [dependencies]

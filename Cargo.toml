@@ -1,7 +1,10 @@
 [package]
 name = "grease-workspace"
-version = "0.1.0"
-authors = ["Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>"]
+version = "0.1.1"
+authors = [
+	"Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>",
+	"David Wood <david.wood@cambridgeconsultants.com>",
+]
 readme = "README.md"
 license-file = "COPYRIGHT"
 build = "build.rs"
