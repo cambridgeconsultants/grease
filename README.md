@@ -176,7 +176,7 @@ Deciding between these two models is something of an art form. The latter is sim
 
 # Implementation in Grease
 
-Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task typically has a single multiple-producer, single-consumer (mpsc) channel from `std::sync::mpsc` but other channels types are not precluded. Notably, when using `mio` it is necessary to use the `mio` channel type, which can make up the `mio` Event poll call when a message arrives. Both *indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel, via boxed trait objects. Once `impl Trait` is stable, we can remove the boxes, but for now, this is the best way to allow a *provider* to be used by a *user* without knowing at compile time what the user is.
+Each layer in the system is implemented as a *task* and each *task* runs in its own thread. Each task typically has a single multiple-producer, single-consumer (mpsc) channel from `std::sync::mpsc` but other channels types are not precluded. Notably, when using `mio` it is necessary to use the `mio` channel type, which can make up the `mio` Event poll call when a message arrives. Both *indications* and *confirmations* from providers below and *requests* and *responses* from any users above are sent to this channel, via boxed trait objects. We may in the future be able to remove the boxes, but for now, this is the best way to allow a *provider* to be used by a *user* without knowing at compile time what the user is.
 
 The goal is to develop tasks which each implement a well-defined layer of functionality, each with minimal coupling and extensive test cases.
 
@@ -231,8 +231,6 @@ A more fully featured logging framework may be added in the future, rather than 
 ## Final notes
 
 Grease is currently a proof-of-concept. Basic TCP socket and HTTP functionality has been implemented as greasy tasks, and a couple of examples demonstrate usage of these tasks (or rather, the services they offer). We welcome constructive feedback and suggestions for improvements! You can also talk to us about how this design approach can help your project.
-
-In particular, we await Rust 1.26 and the stablisation of `impl Trait`. The author is hopeful that this will reduce the need to `Box` the ServiceUser and ServiceProvider traits quite so much.
 
 -- Jonathan Pallant <jonathan.pallant@cambridgeconsultants.com>
 
