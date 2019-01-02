@@ -216,10 +216,6 @@ pub struct IndClosed {
 //
 // ****************************************************************************
 
-/// Represents something an http service user can hold on to to send us
-/// message.
-pub struct Handle(mpsc::Sender<Incoming>);
-
 /// A new one of these is allocated for every new HTTP server
 pub type ServerHandle = Context;
 
@@ -251,6 +247,10 @@ pub enum Error {
 // Private Types
 //
 // ****************************************************************************
+
+/// Represents something an http service user can hold on to to send us
+/// message.
+struct Handle(mpsc::Sender<Incoming>);
 
 service_map! {
 	generate: Incoming,
@@ -333,7 +333,9 @@ type ReplyContext = grease::ReplyContext<Service>;
 
 /// Creates a new socket task. Returns an object that can be used
 /// to send this task messages.
-pub fn make_task(socket: grease::ServiceProviderHandle<socket::Service>) -> Handle {
+pub fn make_task(
+	socket: grease::ServiceProviderHandle<socket::Service>,
+) -> impl grease::ServiceProvider<Service> {
 	let (tx, rx) = mpsc::channel();
 	let handle = Handle(tx.clone());
 	std::thread::spawn(move || {
