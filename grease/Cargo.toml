@@ -6,5 +6,12 @@ authors = [
 	"David Wood <david.wood@cambridgeconsultants.com>",
 ]
 license-file = "../COPYRIGHT"
+build = "build.rs"
 
 [dependencies]
+
+[build-dependencies]
+skeptic = "0.13"
+
+[dev-dependencies]
+skeptic = "0.13"
